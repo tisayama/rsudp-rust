@@ -1,50 +1,50 @@
-# [PROJECT_NAME] Constitution
-<!-- Example: Spec Constitution, TaskFlow Constitution, etc. -->
+<!--
+SYNC IMPACT REPORT
+- Version: 1.0.0 (Initial adoption)
+- Change: Initial creation of the project constitution.
+- Principles Added:
+  - I. 安定性と信頼性 (Stability and Reliability)
+  - II. 厳密なテスト (Rigorous Testing)
+  - III. 高いパフォーマンス (High Performance)
+  - IV. コードの明瞭性と保守性 (Clarity and Maintainability)
+  - V. 日本語による仕様策定 (Specification in Japanese)
+- Templates Checked:
+  - .specify/templates/plan-template.md (✅ No changes needed)
+  - .specify/templates/spec-template.md (✅ No changes needed)
+  - .specify/templates/tasks-template.md (✅ No changes needed)
+-->
+# rsudp-rust 憲法
 
-## Core Principles
+## 基本原則 (Core Principles)
 
-### [PRINCIPLE_1_NAME]
-<!-- Example: I. Library-First -->
-[PRINCIPLE_1_DESCRIPTION]
-<!-- Example: Every feature starts as a standalone library; Libraries must be self-contained, independently testable, documented; Clear purpose required - no organizational-only libraries -->
+### I. 安定性と信頼性 (Stability and Reliability)
+重大な地震データとアラートを扱うため、システムは非常に安定かつ信頼性が高くなければなりません。すべてのコードは堅牢で、エラー処理が徹底され、予期せぬ入力やシステム状態に対して回復力を持つ必要があります。
 
-### [PRINCIPLE_2_NAME]
-<!-- Example: II. CLI Interface -->
-[PRINCIPLE_2_DESCRIPTION]
-<!-- Example: Every library exposes functionality via CLI; Text in/out protocol: stdin/args → stdout, errors → stderr; Support JSON + human-readable formats -->
+### II. 厳密なテスト (Rigorous Testing)
+すべてのコンポーネントには、単体テスト、結合テストを含む包括的なテストが伴わなければなりません。計算の正確性を保証するため、テストデータは適切に管理され、現実世界のシナリオを反映する必要があります。これは譲歩不可能な要件です。
 
-### [PRINCIPLE_3_NAME]
-<!-- Example: III. Test-First (NON-NEGOTIABLE) -->
-[PRINCIPLE_3_DESCRIPTION]
-<!-- Example: TDD mandatory: Tests written → User approved → Tests fail → Then implement; Red-Green-Refactor cycle strictly enforced -->
+### III. 高いパフォーマンス (High Performance)
+PythonアプリケーションのRustによる書き直しとして、大幅なパフォーマンス向上が重要な目標です。コードは、明瞭性や保守性を犠牲にすることなく、速度と低リソース消費のために最適化されるべきです。
 
-### [PRINCIPLE_4_NAME]
-<!-- Example: IV. Integration Testing -->
-[PRINCIPLE_4_DESCRIPTION]
-<!-- Example: Focus areas requiring integration tests: New library contract tests, Contract changes, Inter-service communication, Shared schemas -->
+### IV. コードの明瞭性と保守性 (Clarity and Maintainability)
+コードは、明確で、慣用的なRustのスタイルで書かれなければなりません。ドキュメント、コメント、命名規則は、将来の開発者がコードベースを容易に理解し、保守できるように整備されるべきです。
 
-### [PRINCIPLE_5_NAME]
-<!-- Example: V. Observability, VI. Versioning & Breaking Changes, VII. Simplicity -->
-[PRINCIPLE_5_DESCRIPTION]
-<!-- Example: Text I/O ensures debuggability; Structured logging required; Or: MAJOR.MINOR.BUILD format; Or: Start simple, YAGNI principles -->
+### V. 日本語による仕様策定 (Specification in Japanese)
+プロジェクトの関係者との明確なコミュニケーションと整合性を確保するため、すべてのプロジェクト仕様書、設計ドキュメント、および要件明確化に関する議論は日本語で行われなければなりません。
 
-## [SECTION_2_NAME]
-<!-- Example: Additional Constraints, Security Requirements, Performance Standards, etc. -->
+## 開発ワークフロー (Development Workflow)
 
-[SECTION_2_CONTENT]
-<!-- Example: Technology stack requirements, compliance standards, deployment policies, etc. -->
+本プロジェクトでは、仕様駆動開発（Specification-Driven Development）を採用します。新しい機能の実装や既存機能の変更は、必ず事前に仕様書を作成し、関係者の合意を得てから着手します。
 
-## [SECTION_3_NAME]
-<!-- Example: Development Workflow, Review Process, Quality Gates, etc. -->
+## 品質ゲート (Quality Gates)
 
-[SECTION_3_CONTENT]
-<!-- Example: Code review requirements, testing gates, deployment approval process, etc. -->
+すべてのコード変更は、プルリクエストを通じてレビューされる必要があります。マージされるためには、以下の条件を満たさなければなりません。
+1.  すべてのテストが成功すること。
+2.  コードカバレッジが低下しないこと。
+3.  定義されたコーディング規約に準拠していること。
 
-## Governance
-<!-- Example: Constitution supersedes all other practices; Amendments require documentation, approval, migration plan -->
+## ガバナンス (Governance)
 
-[GOVERNANCE_RULES]
-<!-- Example: All PRs/reviews must verify compliance; Complexity must be justified; Use [GUIDANCE_FILE] for runtime development guidance -->
+この憲法は、他のすべての慣行や規約に優先します。憲法の改正には、変更内容の文書化、主要な貢献者による承認、そして必要に応じた既存コードベースへの移行計画が必要です。すべてのプルリクエストとコードレビューは、この憲法の原則に準拠しているか検証する必要があります。
 
-**Version**: [CONSTITUTION_VERSION] | **Ratified**: [RATIFICATION_DATE] | **Last Amended**: [LAST_AMENDED_DATE]
-<!-- Example: Version: 2.1.1 | Ratified: 2025-06-13 | Last Amended: 2025-07-16 -->
+**バージョン**: 1.0.0 | **制定日**: 2025-12-18 | **最終改正日**: 2025-12-18
