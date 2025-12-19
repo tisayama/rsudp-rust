@@ -1,15 +1,11 @@
 <!--
 SYNC IMPACT REPORT
-- Version: 1.0.0 (Initial adoption)
-- Change: Initial creation of the project constitution.
+- Version: 1.0.0 → 1.1.0 (MINOR bump)
+- Change: Added standard technology stack requirements for WebUI.
 - Principles Added:
-  - I. 安定性と信頼性 (Stability and Reliability)
-  - II. 厳密なテスト (Rigorous Testing)
-  - III. 高いパフォーマンス (High Performance)
-  - IV. コードの明瞭性と保守性 (Clarity and Maintainability)
-  - V. 日本語による仕様策定 (Specification in Japanese)
+  - VI. 標準技術スタック (Standard Tech Stack)
 - Templates Checked:
-  - .specify/templates/plan-template.md (✅ No changes needed)
+  - .specify/templates/plan-template.md (✅ No changes needed, logic already covers constitution checks)
   - .specify/templates/spec-template.md (✅ No changes needed)
   - .specify/templates/tasks-template.md (✅ No changes needed)
 -->
@@ -32,6 +28,9 @@ PythonアプリケーションのRustによる書き直しとして、大幅な�
 ### V. 日本語による仕様策定 (Specification in Japanese)
 プロジェクトの関係者との明確なコミュニケーションと整合性を確保するため、すべてのプロジェクト仕様書、設計ドキュメント、および要件明確化に関する議論は日本語で行われなければなりません。
 
+### VI. 標準技術スタック (Standard Tech Stack)
+WebUIを実装する場合、通信にはREST APIおよびWebSockets（サーバサイド: Rust）を使用し、フロントエンドはNext.jsおよびTailwind CSSを使用しなければなりません。これにより、開発の一貫性と保守性を確保します。
+
 ## 開発ワークフロー (Development Workflow)
 
 本プロジェクトでは、仕様駆動開発（Specification-Driven Development）を採用します。新しい機能の実装や既存機能の変更は、必ず事前に仕様書を作成し、関係者の合意を得てから着手します。
@@ -47,4 +46,4 @@ PythonアプリケーションのRustによる書き直しとして、大幅な�
 
 この憲法は、他のすべての慣行や規約に優先します。憲法の改正には、変更内容の文書化、主要な貢献者による承認、そして必要に応じた既存コードベースへの移行計画が必要です。すべてのプルリクエストとコードレビューは、この憲法の原則に準拠しているか検証する必要があります。
 
-**バージョン**: 1.0.0 | **制定日**: 2025-12-18 | **最終改正日**: 2025-12-18
+**バージョン**: 1.1.0 | **制定日**: 2025-12-18 | **最終改正日**: 2025-12-19

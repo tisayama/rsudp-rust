@@ -1,0 +1,56 @@
+openapi: 3.0.0
+info:
+  title: WebUI Plot System API
+  version: 1.0.0
+  description: REST API for configuring seismic plots and retrieving metadata.
+paths:
+  /api/settings:
+    get:
+      summary: Retrieve current plot settings.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlotSettings'
+    post:
+      summary: Update plot settings.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlotSettings'
+      responses:
+        '200':
+          description: Settings updated.
+  /api/channels:
+    get:
+      summary: List all available seismic channels.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+components:
+  schemas:
+    PlotSettings:
+      type: object
+      properties:
+        active_channels:
+          type: array
+          items:
+            type: string
+        window_seconds:
+          type: integer
+          minimum: 10
+          maximum: 3600
+        auto_scale:
+          type: boolean
+        theme:
+          type: string
+          enum: [dark, light]

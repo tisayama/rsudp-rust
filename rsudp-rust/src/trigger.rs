@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
+use serde::{Serialize, Deserialize};
 
 /// Recursive STA/LTA Trigger Algorithm.
 ///
@@ -87,13 +88,13 @@ pub struct FilterConfig {
     pub order: usize,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum AlertEventType {
     Alarm,
     Reset,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AlertEvent {
     pub event_type: AlertEventType,
     pub timestamp: DateTime<Utc>,
