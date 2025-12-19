@@ -15,6 +15,8 @@ Auto-generated from all feature plans. Last updated: 2025-12-19
 - In-memory state for recursive averages and trigger status. (006-sta-lta-alert)
 - Rust 1.7x (Backend), TypeScript / Next.js 14+ (Frontend) (007-webui-plot)
 - In-memory ring buffer for real-time sample streaming; JSON file or local storage for persistent UI settings. (007-webui-plot)
+- Rust 1.7x + `rustfft` (Frequency domain filtering), `chrono` (Time handling), `tokio::sync::broadcast` (Distribution to WebUI), `serde` (Serialization). (008-seismic-intensity-calc)
+- In-memory sliding window (RingBuffer) of 60 seconds. (008-seismic-intensity-calc)
 
 - Rust 1.7x (latest stable) + None (requires Rust toolchain: `rustc`, `cargo`) (001-init-rust-project)
 
@@ -34,9 +36,9 @@ cargo test [ONLY COMMANDS FOR ACTIVE TECHNOLOGIES][ONLY COMMANDS FOR ACTIVE TECH
 Rust 1.7x (latest stable): Follow standard conventions
 
 ## Recent Changes
+- 008-seismic-intensity-calc: Added Rust 1.7x + `rustfft` (Frequency domain filtering), `chrono` (Time handling), `tokio::sync::broadcast` (Distribution to WebUI), `serde` (Serialization).
 - 007-webui-plot: Added Rust 1.7x (Backend), TypeScript / Next.js 14+ (Frontend)
 - 007-webui-plot: Added [if applicable, e.g., PostgreSQL, CoreData, files or N/A]
-- 006-sta-lta-alert: Added Rust 1.7x + `tokio` (async runtime), `chrono` (time handling), `thiserror` (error handling), `byteorder` (parsing). Verification requires Python 3.x + `obspy`.
 
 
 <!-- MANUAL ADDITIONS START -->

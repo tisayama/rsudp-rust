@@ -1,70 +1,70 @@
-use crate::parser::TraceSegment;
-use crate::parser::header::SeedHeader;
+use crate::parser::header::{parse_header};
 use crate::parser::steim::SteimDecoder;
-use tracing::warn;
+use crate::parser::TraceSegment;
 
-/// Parses a MiniSEED file containing multiple records (Simulation Mode).
-pub fn parse_mseed_file(path: &str) -> Result<Vec<TraceSegment>, String> {
-    let data = std::fs::read(path).map_err(|e| e.to_string())?;
-    parse_mseed_stream(&data)
-}
-
-/// Parses a stream of MiniSEED records.
-pub fn parse_mseed_stream(data: &[u8]) -> Result<Vec<TraceSegment>, String> {
+pub fn parse_mseed_record(data: &[u8]) -> Result<Vec<TraceSegment>, Box<dyn std::error::Error>> {
     let mut segments = Vec::new();
     let mut offset = 0;
 
-    while offset + 48 <= data.len() {
-        match SeedHeader::parse(&data[offset..]) {
-            Ok(header) => {
-                let record_size = header.record_size;
-                if offset + record_size > data.len() {
-                    break;
-                }
+    // MiniSEED records are typically 512 bytes. 
+    // We iterate through chunks of 512 bytes.
+    while offset + 512 <= data.len() {
+        let record = &data[offset..offset + 512];
 
-                let data_offset = header.data_offset as usize;
-                if data_offset > 0 && data_offset < record_size {
-                    let compressed_data = &data[offset + data_offset..offset + record_size];
+        match parse_header(record) {
+            Ok(header) => {
+                let data_start = header.data_offset as usize;
+                
+                if data_start < 512 {
+                    let compressed_data = &record[data_start..512];
                     
-                    let result = if header.encoding == 10 {
-                        SteimDecoder::decode_steim1(compressed_data, header.num_samples as usize)
-                    } else if header.encoding == 11 {
-                        SteimDecoder::decode_steim2(compressed_data, header.num_samples as usize)
-                    } else {
-                        Err(crate::parser::steim::SteimError::InvalidSteimCode(header.encoding))
+                    let result = match header.encoding {
+                        10 => SteimDecoder::decode_steim1(compressed_data, header.num_samples as usize),
+                        11 => SteimDecoder::decode_steim2(compressed_data, header.num_samples as usize),
+                        _ => Err(crate::parser::steim::SteimError::InvalidSteimCode(header.encoding).into()),
                     };
 
                     match result {
                         Ok(samples) => {
+                            let samples_f64: Vec<f64> = samples.iter().map(|&x| x as f64).collect();
+                            
+                            let sampling_rate = if header.sample_rate_factor > 0 {
+                                if header.sample_rate_multiplier > 0 {
+                                    header.sample_rate_factor as f64 * header.sample_rate_multiplier as f64
+                                } else {
+                                    header.sample_rate_factor as f64 / (-header.sample_rate_multiplier as f64)
+                                }
+                            } else {
+                                100.0 // Default for Raspberry Shake
+                            };
+
                             segments.push(TraceSegment {
-                                network: header.network.clone(),
-                                station: header.station.clone(),
-                                location: header.location.clone(),
-                                channel: header.channel.clone(),
-                                starttime: header.start_time,
-                                sampling_rate: header.sample_rate(),
-                                samples: samples.into_iter().map(|x| x as f64).collect(),
+                                network: header.network,
+                                station: header.station,
+                                location: header.location,
+                                channel: header.channel,
+                                starttime: header.starttime,
+                                samples: samples_f64,
+                                sampling_rate,
                             });
                         }
                         Err(e) => {
-                            warn!("Steim decode error at offset {}: {}", offset, e);
+                            tracing::warn!("Steim decode error in record {}: {}", header.sequence_number, e);
                         }
                     }
                 }
-                offset += record_size;
             }
-            Err(_e) => {
-                // If header parsing fails at a 512-byte boundary, it might be a malformed record
-                // Otherwise we just advance to find the next valid record
-                offset += 1;
+            Err(e) => {
+                tracing::debug!("Header parse error at offset {}: {}", offset, e);
             }
         }
+        offset += 512;
     }
 
     Ok(segments)
 }
 
-/// Parses a single MiniSEED record from a byte slice (e.g., from UDP).
-pub fn parse_mseed_record(data: &[u8]) -> Result<Vec<TraceSegment>, String> {
-    parse_mseed_stream(data)
+pub fn parse_mseed_file(path: &str) -> Result<Vec<TraceSegment>, Box<dyn std::error::Error>> {
+    let data = std::fs::read(path)?;
+    parse_mseed_record(&data)
 }

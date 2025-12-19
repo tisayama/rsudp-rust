@@ -50,12 +50,18 @@ export const useWebSocket = (url: string) => {
               sample_rate: sampleRate,
             }
           });
-        } else if (type === 1) {
-          // Alert
-          const json = new TextDecoder().decode(event.data.slice(1));
-          const alert = JSON.parse(json);
-          setLastMessage({ type: 'Alert', data: alert });
-        }
+                  } else if (type === 1) {
+                    // Alert
+                    const json = new TextDecoder().decode(event.data.slice(1));
+                    const alert = JSON.parse(json);
+                    setLastMessage({ type: 'Alert', data: alert });
+                  } else if (type === 2) {
+                    // Intensity
+                    const json = new TextDecoder().decode(event.data.slice(1));
+                    const intensity = JSON.parse(json);
+                    setLastMessage({ type: 'Intensity', data: intensity });
+                  }
+        
       }
     };
 

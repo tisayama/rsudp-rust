@@ -1,0 +1,22 @@
+components:
+  schemas:
+    IntensityMessage:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [Intensity]
+        data:
+          $ref: '#/components/schemas/IntensityResult'
+    IntensityResult:
+      type: object
+      properties:
+        instrumental_intensity:
+          type: number
+          format: float
+        intensity_class:
+          type: string
+          enum: ["0", "1", "2", "3", "4", "5 Lower", "5 Upper", "6 Lower", "6 Upper", "7"]
+        timestamp:
+          type: string
+          format: date-time

@@ -1,135 +1,84 @@
-pub mod receiver;
-pub mod settings;
-pub mod trigger;
-pub mod parser;
-pub mod pipeline;
-pub mod web;
-
+use rsudp_rust::pipeline::{run_pipeline};
+use rsudp_rust::trigger::{TriggerConfig};
+use rsudp_rust::intensity::{IntensityConfig};
+use rsudp_rust::web::{WebState};
+use tokio::sync::mpsc;
 use clap::Parser;
-use settings::Settings;
-use tokio::sync::{mpsc, broadcast};
-use receiver::start_receiver;
-use pipeline::run_pipeline;
-use std::sync::{Arc, RwLock};
-use web::{PlotSettings, stream::WebState};
+
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    #[arg(short, long)]
+    file: Option<String>,
+
+    #[arg(short, long, default_value = "ENE,ENN,ENZ")]
+    channels: String,
+
+    #[arg(short, long, default_value_t = 8081)]
+    web_port: u16,
+}
 
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
-    let settings = Settings::parse();
+    let args = Args::parse();
 
-    // Setup WebUI State
-    let (ws_tx, _) = broadcast::channel(100);
-    let web_settings = Arc::new(RwLock::new(PlotSettings {
-        active_channels: vec!["SHZ".to_string(), "EHZ".to_string()],
-        window_seconds: 60,
-        auto_scale: true,
-        theme: "dark".to_string(),
-    }));
-    
-    let web_state = Arc::new(WebState {
-        settings: web_settings.clone(),
-        tx: ws_tx.clone(),
-    });
+    let web_state = WebState::new();
+    let (pipe_tx, pipe_rx) = mpsc::channel(100);
 
-    // Start WebUI Server
+    // 1. Start Web Server
+    let addr = format!("0.0.0.0:{}", args.web_port);
     let app_state = web_state.clone();
     tokio::spawn(async move {
-        let router = web::routes::create_router(app_state).await;
-        let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await.unwrap();
-        tracing::info!("WebUI server listening on {}", listener.local_addr().unwrap());
-        axum::serve(listener, router)
-            .with_graceful_shutdown(shutdown_signal())
-            .await
-            .unwrap();
+        let router = rsudp_rust::web::routes::create_router(app_state).await;
+        let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
+        tracing::info!("WebUI server listening on {}", addr);
+        axum::serve(listener, router).await.unwrap();
     });
 
-    if settings.mock {
-        let ws_tx_mock = ws_tx.clone();
-        tokio::spawn(async move {
-            tracing::info!("Starting mock data producer for stress testing...");
-            web::test_utils::start_mock_producer(ws_tx_mock).await;
-        });
-    }
+    // 2. Setup Configs
+    let trigger_config = TriggerConfig {
+        sta_sec: 1.0,
+        lta_sec: 10.0,
+        threshold: 3.0,
+        reset_threshold: 1.5,
+    };
 
-    // Channel to Pipeline (MiniSEED bytes)
-    let (pipe_tx, pipe_rx) = mpsc::channel(100);
-    let manager = pipeline::PipelineManager::new(ws_tx);
-
-    // Spawn Ingestion Pipeline task
-    let pipeline_handle = tokio::spawn(async move {
-        run_pipeline(pipe_rx, manager).await;
-    });
-
-    if !settings.file.is_empty() {
-        // --- Simulation Mode ---
-        tracing::info!("Simulation mode: processing {} files", settings.file.len());
-        
-        for path in settings.file {
-            match std::fs::read(&path) {
-                Ok(bytes) => {
-                    tracing::info!("Feeding file: {}", path);
-                    if let Err(e) = pipe_tx.send(bytes).await {
-                        tracing::error!("Pipeline channel error: {}", e);
-                        break;
-                    }
-                }
-                Err(e) => tracing::error!("Failed to read file {}: {}", path, e),
-            }
-        }
-        
-        // Drop tx to signal end of stream to pipeline
-        drop(pipe_tx);
-        // Wait for pipeline to complete processing
-        let _ = pipeline_handle.await;
-        tracing::info!("Simulation complete.");
-        
+    let parts: Vec<String> = args.channels.split(',').map(|s| s.to_string()).collect();
+    let intensity_config = if parts.len() == 3 {
+        Some(IntensityConfig {
+            channels: parts,
+            sample_rate: 100.0,
+            sensitivities: vec![1.0 / 384500.0, 1.0 / 384500.0, 1.0 / 384500.0],
+        })
     } else {
-        // --- Real-time UDP Mode ---
-        tracing::info!("Starting rsudp-rust on port {}", settings.port);
+        None
+    };
 
-        let (net_tx, mut net_rx) = mpsc::channel(100);
-        let port = settings.port;
-
-        // Spawn UDP Receiver
-        tokio::spawn(async move {
-            if let Err(e) = start_receiver(port, net_tx).await {
-                tracing::error!("Receiver error: {}", e);
-            }
+    // 3. Simulation or UDP mode
+    if let Some(path) = args.file {
+        tracing::info!("Simulation mode: processing file {}", path);
+        
+        let ws = web_state.clone();
+        let pipeline_handle = tokio::spawn(async move {
+            run_pipeline(pipe_rx, trigger_config, intensity_config, ws).await;
         });
 
-        // Forward network data to pipeline
-        while let Some(packet) = net_rx.recv().await {
-            if let Err(e) = pipe_tx.send(packet.data).await {
-                tracing::error!("Pipeline channel error: {}", e);
-                break;
-            }
+        // Load the file and feed it to the pipeline
+        // MiniSEED files consist of multiple 512-byte records
+        let bytes = std::fs::read(&path).unwrap();
+        for chunk in bytes.chunks(512) {
+            let _ = pipe_tx.send(chunk.to_vec()).await;
         }
-    }
-}
-
-async fn shutdown_signal() {
-    let ctrl_c = async {
-        tokio::signal::ctrl_c()
-            .await
-            .expect("failed to install Ctrl+C handler");
-    };
-
-    #[cfg(unix)]
-    let terminate = async {
-        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            .expect("failed to install signal handler")
-            .recv()
-            .await;
-    };
-
-    #[cfg(not(unix))]
-    let terminate = std::future::pending::<()>();
-
-    tokio::select! {
-        _ = ctrl_c => {},
-        _ = terminate => {},
+        
+        // Give some time for pipeline to finish
+        drop(pipe_tx);
+        let _ = pipeline_handle.await;
+        
+        tracing::info!("Simulation complete.");
+        return;
     }
 
-    tracing::info!("Shutdown signal received, starting graceful shutdown...");
+    // Keep main alive only in UDP mode
+    tokio::signal::ctrl_c().await.unwrap();
 }

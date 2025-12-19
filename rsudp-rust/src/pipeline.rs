@@ -1,88 +1,63 @@
+use tokio::sync::mpsc;
+use tracing::{info, warn};
 use std::collections::HashMap;
-use crate::trigger::{AlertManager, AlertConfig};
 use crate::parser::{TraceSegment, mseed::parse_mseed_record};
-use crate::web::{WaveformPacket, stream::WsMessage};
-use tokio::sync::{mpsc, broadcast};
-use tracing::{info, error};
-
-pub struct PipelineManager {
-    alerts: HashMap<String, AlertManager>,
-    ws_tx: broadcast::Sender<WsMessage>,
-}
-
-impl PipelineManager {
-    pub fn new(ws_tx: broadcast::Sender<WsMessage>) -> Self {
-        Self {
-            alerts: HashMap::new(),
-            ws_tx,
-        }
-    }
-
-    pub async fn process_segment(&mut self, segment: TraceSegment) {
-        let nslc = segment.nslc();
-        
-        // Broadcast raw waveform to WebUI
-        let packet = WaveformPacket {
-            channel_id: nslc.clone(),
-            timestamp: segment.starttime,
-            samples: segment.samples.iter().map(|&s| s as f32).collect(),
-            sample_rate: segment.sampling_rate as f32,
-        };
-        let _ = self.ws_tx.send(WsMessage::Waveform(packet));
-
-        // Get or create AlertManager for this channel
-        if !self.alerts.contains_key(&nslc) {
-            let (event_tx, mut event_rx) = mpsc::channel(10);
-            let config = AlertConfig {
-                sta_seconds: 1.0,
-                lta_seconds: 30.0,
-                threshold: 3.0,
-                reset_threshold: 1.5,
-                min_duration: 0.0,
-                channel_id: nslc.clone(),
-                filter_config: None,
-                sample_rate: segment.sampling_rate,
-            };
-            let manager = AlertManager::new(config, event_tx);
-            self.alerts.insert(nslc.clone(), manager);
-
-            // Spawn task to forward alerts to WebUI
-            let ws_tx_inner = self.ws_tx.clone();
-            tokio::spawn(async move {
-                while let Some(event) = event_rx.recv().await {
-                    let _ = ws_tx_inner.send(WsMessage::Alert(event));
-                }
-            });
-        }
-
-        if let Some(manager) = self.alerts.get_mut(&nslc) {
-            let mut current_time = segment.starttime;
-            let dt = chrono::Duration::nanoseconds((1e9 / segment.sampling_rate) as i64);
-            
-            for sample in segment.samples {
-                if let Err(e) = manager.process_sample(sample, current_time).await {
-                    error!("AlertManager error for {}: {}", nslc, e);
-                }
-                current_time = current_time + dt;
-            }
-        }
-    }
-}
+use crate::trigger::{TriggerManager, TriggerConfig};
+use crate::intensity::{IntensityManager, IntensityConfig};
+use crate::web::stream::WebState;
 
 pub async fn run_pipeline(
-    mut input_rx: mpsc::Receiver<Vec<u8>>,
-    mut manager: PipelineManager,
+    mut receiver: mpsc::Receiver<Vec<u8>>,
+    trigger_config: TriggerConfig,
+    intensity_config: Option<IntensityConfig>,
+    web_state: WebState,
 ) {
     info!("Pipeline started");
-    while let Some(data) = input_rx.recv().await {
-        match parse_mseed_record(&data) {
-            Ok(segments) => {
-                for segment in segments {
-                    manager.process_segment(segment).await;
+    let mut tm = TriggerManager::new(trigger_config);
+    let mut im = intensity_config.map(IntensityManager::new);
+
+    while let Some(data) = receiver.recv().await {
+        let segments = match parse_mseed_record(&data) {
+            Ok(s) => s,
+            Err(e) => {
+                warn!("Parser error: {}", e);
+                continue;
+            }
+        };
+
+        for segment in segments {
+            // 1. STA/LTA Triggering
+            let id = format!("{}.{}.{}.{}", segment.network, segment.station, segment.location, segment.channel);
+            for &sample in &segment.samples {
+                if let Some(alert) = tm.add_sample(&id, sample, segment.starttime) {
+                    info!("{}", alert);
+                    web_state.broadcast_alert(alert).await;
                 }
             }
-            Err(e) => {
-                error!("Parser error: {}", e);
+
+            // 2. WebUI Waveform Stream
+            web_state.broadcast_waveform(segment.channel.clone(), segment.starttime, segment.samples.clone()).await;
+
+            // 3. Seismic Intensity Calculation
+            if let Some(im) = im.as_mut() {
+                // Check if this channel is one of the 3-component targets
+                let is_target = im.config().channels.iter().any(|target| id.contains(target));
+                
+                if is_target {
+                    let mut map = HashMap::new();
+                    // Map to simple channel name (ENE, ENN, ENZ) for internal manager
+                    let short_name = if id.contains("ENE") { "ENE" }
+                                    else if id.contains("ENN") { "ENN" }
+                                    else { "ENZ" };
+                    
+                    map.insert(short_name.to_string(), segment.samples.clone());
+                    im.add_samples(map, segment.starttime);
+
+                    for res in im.get_results() {
+                        info!("[{}] 計測震度: {:.2} ({})", res.timestamp, res.intensity, res.shindo_class);
+                        web_state.broadcast_intensity(res).await;
+                    }
+                }
             }
         }
     }

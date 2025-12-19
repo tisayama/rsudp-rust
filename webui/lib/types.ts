@@ -21,6 +21,13 @@ export interface AlertEvent {
   max_ratio?: number;
 }
 
+export interface IntensityResult {
+  instrumental_intensity: number;
+  intensity_class: string;
+  timestamp: string;
+}
+
 export type WsMessage = 
   | { type: 'Waveform', data: WaveformPacket }
-  | { type: 'Alert', data: AlertEvent };
+  | { type: 'Alert', data: AlertEvent }
+  | { type: 'Intensity', data: IntensityResult };
