@@ -11,6 +11,8 @@ Auto-generated from all feature plans. Last updated: 2025-12-19
 - In-memory (filter state management) (004-data-ingestion-pipeline)
 - Rust 1.7x (latest stable) + `byteorder` (endian-aware parsing), `chrono` (time handling), `thiserror` (error management). (005-pure-rust-mseed)
 - N/A (Streaming parser) (005-pure-rust-mseed)
+- Rust 1.7x + `tokio` (async runtime), `chrono` (time handling), `thiserror` (error handling), `byteorder` (parsing). Verification requires Python 3.x + `obspy`. (006-sta-lta-alert)
+- In-memory state for recursive averages and trigger status. (006-sta-lta-alert)
 
 - Rust 1.7x (latest stable) + None (requires Rust toolchain: `rustc`, `cargo`) (001-init-rust-project)
 
@@ -30,9 +32,9 @@ cargo test [ONLY COMMANDS FOR ACTIVE TECHNOLOGIES][ONLY COMMANDS FOR ACTIVE TECH
 Rust 1.7x (latest stable): Follow standard conventions
 
 ## Recent Changes
+- 006-sta-lta-alert: Added Rust 1.7x + `tokio` (async runtime), `chrono` (time handling), `thiserror` (error handling), `byteorder` (parsing). Verification requires Python 3.x + `obspy`.
 - 005-pure-rust-mseed: Added Rust 1.7x (latest stable) + `byteorder` (endian-aware parsing), `chrono` (time handling), `thiserror` (error management).
 - 004-data-ingestion-pipeline: Added Rust 1.7x (latest stable) + `tokio` (async runtime), `clap` (CLI), `tracing` (logging), `mseed` (potential for MiniSEED parsing)
-- 003-sta-lta-calc: Added Rust 1.7x (latest stable) + None (standard library only for calculation). Python 3.x + `obspy` required for verification tests.
 
 
 <!-- MANUAL ADDITIONS START -->
