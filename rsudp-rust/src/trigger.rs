@@ -125,15 +125,16 @@ mod tests {
             
             let ratio = stalta.process(input);
             
-            // Relaxed tolerance to 2e-3 due to implementation differences (likely FMA or initialization nuances)
-            // between Obspy C-extension and Rust f64 arithmetic.
-            // Verified that pure python implementation also differs from Obspy by ~1e-3.
-            if (ratio - expected_ratio).abs() >= 2e-3 {
-                println!("Mismatch at index {}: input={}, got={}, expected={}", i, input, ratio, expected_ratio);
+            // Tolerance relaxed to 2e-3 due to inherent implementation differences
+            // between Obspy C extension and Rust/Python pure implementations.
+            // Pure Python implementation in generate_stalta_reference.py also shows ~1e-3 diff.
+            let diff = (ratio - expected_ratio).abs();
+            if diff >= 2e-3 {
+                println!("Mismatch at index {}: input={}, got={}, expected={}, diff={}", i, input, ratio, expected_ratio, diff);
             }
 
-            assert!((ratio - expected_ratio).abs() < 2e-3, 
-                "Mismatch at index {}: input {}, got {}, expected {}", i, input, ratio, expected_ratio);
+            assert!(diff < 2e-3, 
+                "Mismatch at index {}: input {}, got {}, expected {}, diff {}", i, input, ratio, expected_ratio, diff);
         }
     }
 }
