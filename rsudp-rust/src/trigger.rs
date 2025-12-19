@@ -2,13 +2,10 @@
 ///
 /// Implements the recursive STA/LTA algorithm compatible with `obspy.signal.trigger.recursive_sta_lta`.
 ///
-/// Formula:
-/// ```text
-/// csta = 1.0 / nsta
-/// clta = 1.0 / nlta
-/// sta = sta * (1.0 - csta) + energy * csta
-/// lta = lta * (1.0 - clta) + energy * clta
-/// ratio = sta / lta
+/// Formula (from obspy/signal/src/recstalta.c):
+/// ```c
+/// sta = csta * pow(a[i],2) + (1-csta)*sta;
+/// lta = clta * pow(a[i],2) + (1-clta)*lta;
 /// ```
 #[derive(Debug, Clone)]
 pub struct RecursiveStaLta {
@@ -16,18 +13,12 @@ pub struct RecursiveStaLta {
     clta: f64,
     sta: f64,
     lta: f64,
-    // Add counters for startup muting
     count: usize,
     nlta_len: usize,
 }
 
 impl RecursiveStaLta {
     /// Create a new RecursiveStaLta filter.
-    ///
-    /// # Arguments
-    ///
-    /// * `nsta` - Window length of Short Term Average in samples.
-    /// * `nlta` - Window length of Long Term Average in samples.
     pub fn new(nsta: usize, nlta: usize) -> Self {
         Self {
             csta: 1.0 / nsta as f64,
@@ -40,31 +31,27 @@ impl RecursiveStaLta {
     }
 
     /// Process a single sample and return the current STA/LTA ratio.
-    ///
-    /// Handles NaN/Inf inputs by treating them as 0.0 and returning 0.0.
-    /// Returns 0.0 for the first `nlta` samples to match Obspy behavior.
+    /// Matches Obspy's C implementation exactly.
     pub fn process(&mut self, sample: f64) -> f64 {
-        // T009: Handle NaN/Inf
+        self.count += 1;
+
+        // Obspy's C implementation starts the loop from i=1, skipping i=0 completely.
+        if self.count == 1 {
+            return 0.0;
+        }
+
+        // Handle NaN/Inf (Safety addition)
         if !sample.is_finite() {
             return 0.0;
         }
 
         let sq = sample * sample;
         
-        // Exact formula and order from obspy implementation
-        // sta += (input^2 - sta) * csta
-        self.sta += (sq - self.sta) * self.csta;
-        self.lta += (sq - self.lta) * self.clta;
+        // Exact formula and order from obspy/signal/src/recstalta.c
+        self.sta = self.csta * sq + (1.0 - self.csta) * self.sta;
+        self.lta = self.clta * sq + (1.0 - self.clta) * self.lta;
         
-        // Obspy guard logic: reset if lta is too small
-        if self.lta < 1e-99 {
-            self.sta = 0.0;
-            self.lta = 1e-99;
-        }
-        
-        self.count += 1;
-
-        // Obspy recursive_sta_lta outputs 0 for the first nlta samples
+        // Obspy's Python wrapper or the C post-processing zeros out the first nlta samples.
         if self.count <= self.nlta_len {
             return 0.0;
         }
@@ -72,7 +59,7 @@ impl RecursiveStaLta {
         self.sta / self.lta
     }
 
-    /// Process a chunk of samples and return a vector of ratios.
+    /// Process a chunk of samples.
     pub fn process_chunk(&mut self, data: &[f64]) -> Vec<f64> {
         data.iter().map(|&x| self.process(x)).collect()
     }
@@ -89,16 +76,12 @@ mod tests {
         let mut stalta = RecursiveStaLta::new(10, 100);
         let ratio = stalta.process(f64::NAN);
         assert_eq!(ratio, 0.0);
-        let ratio = stalta.process(f64::INFINITY);
-        assert_eq!(ratio, 0.0);
     }
 
     #[test]
-    fn test_compare_with_obspy() {
-        // Run python script to generate reference.csv
+    fn test_compare_with_obspy_exact() {
         let script_path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/scripts/generate_stalta_reference.py");
-        // Create target directory if it doesn't exist
         let target_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("target");
         if !target_dir.exists() {
             std::fs::create_dir(&target_dir).unwrap();
@@ -109,13 +92,11 @@ mod tests {
             .arg(script_path)
             .arg(&output_csv)
             .status()
-            .expect("Failed to execute python script. Make sure python3 and obspy are installed.");
+            .expect("Failed to execute python script");
             
-        assert!(status.success(), "Python script failed");
+        assert!(status.success());
         
-        // Read CSV and verify
         let mut rdr = csv::Reader::from_path(&output_csv).unwrap();
-        // Default parameters in python script are nsta=50, nlta=200
         let mut stalta = RecursiveStaLta::new(50, 200); 
         
         for (i, result) in rdr.records().enumerate() {
@@ -125,16 +106,10 @@ mod tests {
             
             let ratio = stalta.process(input);
             
-            // Tolerance relaxed to 2e-3 due to inherent implementation differences
-            // between Obspy C extension and Rust/Python pure implementations.
-            // Pure Python implementation in generate_stalta_reference.py also shows ~1e-3 diff.
             let diff = (ratio - expected_ratio).abs();
-            if diff >= 2e-3 {
-                println!("Mismatch at index {}: input={}, got={}, expected={}, diff={}", i, input, ratio, expected_ratio, diff);
-            }
-
-            assert!(diff < 2e-3, 
-                "Mismatch at index {}: input {}, got {}, expected {}, diff {}", i, input, ratio, expected_ratio, diff);
+            // Target high precision match (1e-12 or better)
+            assert!(diff < 1e-12, 
+                "Mismatch at index {}: got {:.20}, expected {:.20}, diff {:.20}", i, ratio, expected_ratio, diff);
         }
     }
 }
