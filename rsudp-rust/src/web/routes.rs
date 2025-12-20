@@ -1,10 +1,6 @@
-use axum::{
-    routing::{get},
-    extract::State,
-    Router, Json,
-};
+use crate::web::stream::{PlotSettings, WebState};
+use axum::{Json, Router, extract::State, routing::get};
 use tower_http::cors::CorsLayer;
-use crate::web::stream::{WebState, PlotSettings};
 
 pub async fn create_router(state: WebState) -> Router {
     Router::new()

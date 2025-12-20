@@ -1,5 +1,5 @@
-use serde::{Serialize, Deserialize};
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 
 mod calc;
 pub mod filter;
@@ -21,14 +21,25 @@ pub struct IntensityResult {
 }
 
 pub fn get_shindo_class(intensity: f64) -> String {
-    if intensity < 0.5 { "0".to_string() }
-    else if intensity < 1.5 { "1".to_string() }
-    else if intensity < 2.5 { "2".to_string() }
-    else if intensity < 3.5 { "3".to_string() }
-    else if intensity < 4.5 { "4".to_string() }
-    else if intensity < 5.0 { "5-".to_string() }
-    else if intensity < 5.5 { "5+".to_string() }
-    else if intensity < 6.0 { "6-".to_string() }
-    else if intensity < 6.5 { "6+".to_string() }
-    else { "7".to_string() }
+    if intensity < 0.5 {
+        "0".to_string()
+    } else if intensity < 1.5 {
+        "1".to_string()
+    } else if intensity < 2.5 {
+        "2".to_string()
+    } else if intensity < 3.5 {
+        "3".to_string()
+    } else if intensity < 4.5 {
+        "4".to_string()
+    } else if intensity < 5.0 {
+        "5-".to_string()
+    } else if intensity < 5.5 {
+        "5+".to_string()
+    } else if intensity < 6.0 {
+        "6-".to_string()
+    } else if intensity < 6.5 {
+        "6+".to_string()
+    } else {
+        "7".to_string()
+    }
 }

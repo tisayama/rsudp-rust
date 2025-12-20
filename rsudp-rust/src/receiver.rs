@@ -1,7 +1,7 @@
 use std::net::SocketAddr;
 use std::time::Instant;
-use tokio::sync::mpsc;
 use tokio::net::UdpSocket;
+use tokio::sync::mpsc;
 use tracing::{info, warn};
 
 #[derive(Debug, Clone)]

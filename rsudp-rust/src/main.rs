@@ -1,21 +1,40 @@
-use rsudp_rust::pipeline::{run_pipeline};
-use rsudp_rust::trigger::{TriggerConfig};
-use rsudp_rust::intensity::{IntensityConfig};
-use rsudp_rust::web::{WebState};
+use rsudp_rust::pipeline::run_pipeline;
+use rsudp_rust::trigger::TriggerConfig;
+use rsudp_rust::intensity::IntensityConfig;
+use rsudp_rust::web::WebState;
+use rsudp_rust::receiver::start_receiver;
+use rsudp_rust::parser::stationxml::fetch_sensitivity;
+use rsudp_rust::parser::mseed::parse_mseed_file;
 use tokio::sync::mpsc;
 use clap::Parser;
+use std::collections::HashMap;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
+    /// MiniSEED file for simulation
     #[arg(short, long)]
     file: Option<String>,
 
+    /// Network code (used if no file is provided)
+    #[arg(short, long, default_value = "AM")]
+    network: String,
+
+    /// Station name (used if no file is provided)
+    #[arg(short, long, default_value = "S9AF3")]
+    station: String,
+
+    /// Channels for intensity calculation (must be 3)
     #[arg(short, long, default_value = "ENE,ENN,ENZ")]
     channels: String,
 
+    /// WebUI port
     #[arg(short, long, default_value_t = 8081)]
     web_port: u16,
+
+    /// UDP port for receiver
+    #[arg(short, long, default_value_t = 12345)]
+    udp_port: u16,
 }
 
 #[tokio::main]
@@ -36,7 +55,32 @@ async fn main() {
         axum::serve(listener, router).await.unwrap();
     });
 
-    // 2. Setup Configs
+    // 2. Determine target station and fetch metadata
+    let (net, sta) = if let Some(path) = &args.file {
+        // Peek at file to find station
+        match parse_mseed_file(path) {
+            Ok(segs) if !segs.is_empty() => (segs[0].network.clone(), segs[0].station.clone()),
+            _ => (args.network.clone(), args.station.clone()),
+        }
+    } else {
+        (args.network.clone(), args.station.clone())
+    };
+
+    tracing::info!("Using metadata for Station: {}.{}", net, sta);
+    let sens_map = match fetch_sensitivity(&net, &sta) {
+        Ok(map) => map,
+        Err(e) => {
+            tracing::warn!("Could not fetch StationXML from FDSN: {}. Using default RS4D sensitivity (384,500).", e);
+            let mut fallback = HashMap::new();
+            fallback.insert("ENE".to_string(), 384500.0);
+            fallback.insert("ENN".to_string(), 384500.0);
+            fallback.insert("ENZ".to_string(), 384500.0);
+            fallback.insert("EHZ".to_string(), 384500.0);
+            fallback
+        }
+    };
+
+    // 3. Setup Configs
     let trigger_config = TriggerConfig {
         sta_sec: 1.0,
         lta_sec: 10.0,
@@ -44,41 +88,60 @@ async fn main() {
         reset_threshold: 1.5,
     };
 
-    let parts: Vec<String> = args.channels.split(',').map(|s| s.to_string()).collect();
-    let intensity_config = if parts.len() == 3 {
+    let target_channels: Vec<String> = args.channels.split(',').map(|s| s.to_string()).collect();
+    let intensity_config = if target_channels.len() == 3 {
+        let mut sensitivities = Vec::new();
+        for ch in &target_channels {
+            let s = sens_map.get(ch).cloned().unwrap_or(384500.0);
+            sensitivities.push(1.0 / s);
+        }
         Some(IntensityConfig {
-            channels: parts,
+            channels: target_channels,
             sample_rate: 100.0,
-            sensitivities: vec![1.0 / 384500.0, 1.0 / 384500.0, 1.0 / 384500.0],
+            sensitivities,
         })
     } else {
         None
     };
 
-    // 3. Simulation or UDP mode
+    // 4. Simulation or Live UDP mode
     if let Some(path) = args.file {
         tracing::info!("Simulation mode: processing file {}", path);
-        
         let ws = web_state.clone();
         let pipeline_handle = tokio::spawn(async move {
             run_pipeline(pipe_rx, trigger_config, intensity_config, ws).await;
         });
 
-        // Load the file and feed it to the pipeline
-        // MiniSEED files consist of multiple 512-byte records
         let bytes = std::fs::read(&path).unwrap();
         for chunk in bytes.chunks(512) {
             let _ = pipe_tx.send(chunk.to_vec()).await;
         }
         
-        // Give some time for pipeline to finish
         drop(pipe_tx);
         let _ = pipeline_handle.await;
-        
         tracing::info!("Simulation complete.");
         return;
+    } else {
+        // LIVE UDP MODE
+        let ws = web_state.clone();
+        tokio::spawn(async move {
+            run_pipeline(pipe_rx, trigger_config, intensity_config, ws).await;
+        });
+
+        let (recv_tx, mut recv_rx) = mpsc::channel(100);
+        tokio::spawn(async move {
+            if let Err(e) = start_receiver(args.udp_port, recv_tx).await {
+                tracing::error!("Receiver error: {}", e);
+            }
+        });
+
+        tokio::spawn(async move {
+            while let Some(packet) = recv_rx.recv().await {
+                let _ = pipe_tx.send(packet.data).await;
+            }
+        });
     }
 
-    // Keep main alive only in UDP mode
+    tracing::info!("Running in Live UDP mode. Press Ctrl+C to stop.");
     tokio::signal::ctrl_c().await.unwrap();
 }

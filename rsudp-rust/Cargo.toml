@@ -19,6 +19,11 @@ futures-util = "0.3"
 rustfft = "6.2"
 num-complex = "0.4"
 mseed = "0.7"
+quick-xml = { version = "0.37", features = ["serialize"] }
 
 [dev-dependencies]
 csv = "1.3"
+
+[[bin]]
+name = "streamer"
+path = "src/bin/streamer.rs"

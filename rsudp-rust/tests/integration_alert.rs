@@ -1,5 +1,5 @@
-use rsudp_rust::trigger::{TriggerManager, TriggerConfig, AlertEventType};
 use chrono::Utc;
+use rsudp_rust::trigger::{AlertEventType, TriggerConfig, TriggerManager};
 
 #[tokio::test]
 async fn test_sta_lta_trigger() {
