@@ -1,12 +1,15 @@
 'use client';
 
 import { useWebSocket } from '../../hooks/useWebSocket';
+import { useAlerts } from '../../hooks/useAlerts';
 import { useEffect, useRef, useState } from 'react';
 import { RingBuffer } from '../../lib/RingBuffer';
 import WaveformCanvas from '../../components/WaveformCanvas';
 import ControlPanel from '../../components/ControlPanel';
+import AlertSettingsPanel from '../../components/AlertSettingsPanel';
 import PerformanceMonitor from '../../components/PerformanceMonitor';
-import { AlertEvent, PlotSettings } from '../../lib/types';
+import { PlotSettings, VisualAlertMarker } from '../../lib/types';
+import Link from 'next/link';
 
 const DEFAULT_SETTINGS: PlotSettings = {
   active_channels: ['SHZ', 'EHZ'],
@@ -17,10 +20,11 @@ const DEFAULT_SETTINGS: PlotSettings = {
 
 export default function Home() {
   const { isConnected, lastMessage } = useWebSocket('ws://localhost:8080/ws');
+  const { isAlerting } = useAlerts(lastMessage);
   const [settings, setSettings] = useState<PlotSettings>(DEFAULT_SETTINGS);
   const [availableChannels, setAvailableChannels] = useState<string[]>([]);
   const [buffers, setBuffers] = useState<Record<string, RingBuffer>>({});
-  const [alerts, setAlerts] = useState<AlertEvent[]>([]);
+  const [visualAlerts, setVisualAlerts] = useState<VisualAlertMarker[]>([]);
   
   const buffersRef = useRef<Record<string, RingBuffer>>({});
 
@@ -57,13 +61,17 @@ export default function Home() {
         setBuffers({ ...buffersRef.current });
       }
       buffersRef.current[channel_id].pushMany(samples);
-    } else if (lastMessage.type === 'Alert') {
-      setAlerts(prev => [...prev, lastMessage.data].slice(-20)); // Keep last 20
+    } else if (lastMessage.type === 'AlertStart') {
+      const { channel, timestamp } = lastMessage.data;
+      setVisualAlerts(prev => [...prev, { type: 'Alarm' as const, channel, timestamp }].slice(-50));
+    } else if (lastMessage.type === 'AlertEnd') {
+      const { channel, timestamp } = lastMessage.data;
+      setVisualAlerts(prev => [...prev, { type: 'Reset' as const, channel, timestamp }].slice(-50));
     }
   }, [lastMessage, settings.active_channels]);
 
   return (
-    <main className="min-h-screen bg-slate-50 p-4 md:p-8">
+    <main className={`min-h-screen p-4 md:p-8 transition-colors duration-300 ${isAlerting ? 'bg-rose-600 animate-pulse' : 'bg-slate-50'}`}>
       <PerformanceMonitor />
       <div className="max-w-7xl mx-auto flex flex-col lg:flex-row gap-8">
         <div className="flex-1 space-y-6">
@@ -93,7 +101,7 @@ export default function Home() {
                     windowSeconds={settings.window_seconds}
                     sampleRate={100}
                     autoScale={settings.auto_scale}
-                    alerts={alerts}
+                    alerts={visualAlerts}
                   />
                 </div>
               ))
@@ -102,11 +110,18 @@ export default function Home() {
         </div>
 
         <aside className="lg:w-80 space-y-6">
+          <Link 
+            href="/history" 
+            className="flex items-center justify-center w-full py-3 bg-blue-600 text-white rounded-xl font-bold shadow-lg shadow-blue-200 hover:bg-blue-700 transition-all hover:scale-[1.02] active:scale-95"
+          >
+            View Alert History
+          </Link>
           <ControlPanel 
             settings={settings} 
             onSettingsChange={handleSettingsChange}
             availableChannels={availableChannels}
           />
+          <AlertSettingsPanel />
         </aside>
       </div>
     </main>

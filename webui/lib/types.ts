@@ -14,11 +14,19 @@ export interface PlotSettings {
 
 export type AlertEventType = 'Alarm' | 'Reset';
 
-export interface AlertEvent {
-  event_type: AlertEventType;
+export interface VisualAlertMarker {
+  type: 'Alarm' | 'Reset';
   timestamp: string;
-  channel_id: string;
-  max_ratio?: number;
+  channel: string;
+}
+
+export interface AlertEvent {
+  id: string;
+  channel: string;
+  trigger_time: string;
+  reset_time: string | null;
+  max_ratio: number;
+  snapshot_path: string | null;
 }
 
 export interface IntensityResult {
@@ -27,7 +35,20 @@ export interface IntensityResult {
   timestamp: string;
 }
 
+export interface AlertSettings {
+  audio_enabled: boolean;
+  email_enabled: boolean;
+  flash_enabled: boolean;
+  smtp_host: string;
+  smtp_port: number;
+  smtp_user: string;
+  smtp_pass: string;
+  email_recipient: string;
+}
+
 export type WsMessage = 
   | { type: 'Waveform', data: WaveformPacket }
-  | { type: 'Alert', data: AlertEvent }
-  | { type: 'Intensity', data: IntensityResult };
+  | { type: 'Alert', data: { timestamp: string, channel: string, message: string } }
+  | { type: 'Intensity', data: IntensityResult }
+  | { type: 'AlertStart', data: { id: string, channel: string, timestamp: string } }
+  | { type: 'AlertEnd', data: { id: string, channel: string, timestamp: string, max_ratio: number } };

@@ -19,6 +19,8 @@ Auto-generated from all feature plans. Last updated: 2025-12-19
 - In-memory sliding window (RingBuffer) of 60 seconds. (008-seismic-intensity-calc)
 - Rust 1.7x + `tokio` (async), `clap` (CLI), `tracing` (logging), `byteorder` (binary parsing), `chrono` (time), `serde_json` (packet format) (009-udp-mseed-streamer)
 - N/A (Read-only filesystem access) (009-udp-mseed-streamer)
+- Rust 1.7x (Backend), TypeScript / Next.js 14+ (Frontend) + `plotters` (Plotting), `lettre` (SMTP), `tower-http` (Static serving), `axum` (REST API), `tokio` (Async runtime) (010-comprehensive-alerting)
+- Local filesystem for PNGs, In-memory for 24h history (extendable to JSON/SQLite if persistence required) (010-comprehensive-alerting)
 
 - Rust 1.7x (latest stable) + None (requires Rust toolchain: `rustc`, `cargo`) (001-init-rust-project)
 
@@ -38,9 +40,9 @@ cargo test [ONLY COMMANDS FOR ACTIVE TECHNOLOGIES][ONLY COMMANDS FOR ACTIVE TECH
 Rust 1.7x (latest stable): Follow standard conventions
 
 ## Recent Changes
+- 010-comprehensive-alerting: Added Rust 1.7x (Backend), TypeScript / Next.js 14+ (Frontend) + `plotters` (Plotting), `lettre` (SMTP), `tower-http` (Static serving), `axum` (REST API), `tokio` (Async runtime)
 - 009-udp-mseed-streamer: Added Rust 1.7x + `tokio` (async), `clap` (CLI), `tracing` (logging), `byteorder` (binary parsing), `chrono` (time), `serde_json` (packet format)
 - 008-seismic-intensity-calc: Added Rust 1.7x + `rustfft` (Frequency domain filtering), `chrono` (Time handling), `tokio::sync::broadcast` (Distribution to WebUI), `serde` (Serialization).
-- 007-webui-plot: Added Rust 1.7x (Backend), TypeScript / Next.js 14+ (Frontend)
 
 
 <!-- MANUAL ADDITIONS START -->

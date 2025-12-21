@@ -2,25 +2,25 @@
 
 import React, { useEffect, useRef } from 'react';
 import { RingBuffer } from '../lib/RingBuffer';
-import { AlertEvent } from '../lib/types';
+import { VisualAlertMarker } from '../lib/types';
 
 interface WaveformCanvasProps {
   buffer: RingBuffer;
   channelId: string;
-  width?: number;
-  height?: number;
+  width: number;
+  height: number;
   windowSeconds: number;
   sampleRate: number;
   autoScale: boolean;
-  alerts: AlertEvent[];
+  alerts: VisualAlertMarker[];
 }
 
 const WaveformCanvas: React.FC<WaveformCanvasProps> = ({ 
   buffer, 
   channelId, 
-  width = 800, 
-  height = 200,
-  windowSeconds,
+  width, 
+  height, 
+  windowSeconds, 
   sampleRate,
   autoScale,
   alerts
@@ -28,107 +28,108 @@ const WaveformCanvas: React.FC<WaveformCanvasProps> = ({
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
-    let animationId: number;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
 
     const render = () => {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-
-      const dpr = window.devicePixelRatio || 1;
-      canvas.width = width * dpr;
-      canvas.height = height * dpr;
-      ctx.scale(dpr, dpr);
-
-      ctx.clearRect(0, 0, width, height);
+      const samples = buffer.getTail(windowSeconds * sampleRate);
       
-      const totalSamples = windowSeconds * sampleRate;
-      const currentLen = buffer.length;
-      if (currentLen < 2) {
-        animationId = requestAnimationFrame(render);
-        return;
+      // Clear
+      ctx.clearRect(0, 0, width, height);
+
+      if (samples.length === 0) return;
+
+      // Draw Grid
+      ctx.strokeStyle = '#e2e8f0';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let i = 1; i < 4; i++) {
+        const y = (height / 4) * i;
+        ctx.moveTo(0, y);
+        ctx.lineTo(width, y);
       }
+      ctx.stroke();
 
-      const viewLen = Math.min(currentLen, totalSamples);
-      const startIndex = currentLen - viewLen;
-      const step = width / (totalSamples - 1);
-
-      // Auto-scale
-      let scale = 1;
+      // Find Scale
+      let yMin = -1000;
+      let yMax = 1000;
+      
       if (autoScale) {
         let maxAbs = 0;
-        for (let i = 0; i < viewLen; i++) {
-          const val = Math.abs(buffer.get(startIndex + i));
-          if (val > maxAbs) maxAbs = val;
+        for (const s of samples) {
+          if (Math.abs(s) > maxAbs) maxAbs = Math.abs(s);
         }
-        scale = maxAbs === 0 ? 1 : (height / 2.2) / maxAbs;
-      } else {
-        scale = 0.001;
+        if (maxAbs > 0) {
+          yMin = -maxAbs * 1.1;
+          yMax = maxAbs * 1.1;
+        }
       }
 
+      const mapY = (val: number) => {
+        return height - ((val - yMin) / (yMax - yMin)) * height;
+      };
+
       // Draw Waveform
-      ctx.beginPath();
-      ctx.strokeStyle = '#3b82f6';
+      ctx.strokeStyle = '#2563eb';
       ctx.lineWidth = 1.5;
-      for (let i = 0; i < viewLen; i++) {
-        const x = (totalSamples - viewLen + i) * step;
-        const y = (height / 2) - (buffer.get(startIndex + i) * scale);
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      for (let i = 0; i < samples.length; i++) {
+        const x = (i / (windowSeconds * sampleRate)) * width;
+        const y = mapY(samples[i]);
         if (i === 0) ctx.moveTo(x, y);
         else ctx.lineTo(x, y);
       }
       ctx.stroke();
 
-      // Draw Alerts
+      // Draw Alert Markers
       const now = new Date();
       alerts.forEach(alert => {
-        if (alert.channel_id !== channelId) return;
+        if (alert.channel !== channelId) return;
         
         const alertTime = new Date(alert.timestamp);
         const diffMs = now.getTime() - alertTime.getTime();
         const diffSec = diffMs / 1000;
 
-        if (diffSec < windowSeconds && diffSec >= 0) {
-          const x = width - (diffSec * sampleRate * step);
+        if (diffSec >= 0 && diffSec <= windowSeconds) {
+          const x = width - (diffSec / windowSeconds) * width;
           
           ctx.beginPath();
           ctx.setLineDash([5, 5]);
-          ctx.strokeStyle = alert.event_type === 'Alarm' ? '#ef4444' : '#10b981';
+          ctx.strokeStyle = alert.type === 'Alarm' ? '#ef4444' : '#10b981';
           ctx.lineWidth = 2;
           ctx.moveTo(x, 0);
           ctx.lineTo(x, height);
           ctx.stroke();
           ctx.setLineDash([]);
 
-          ctx.fillStyle = alert.event_type === 'Alarm' ? '#ef4444' : '#10b981';
+          ctx.fillStyle = alert.type === 'Alarm' ? '#ef4444' : '#10b981';
           ctx.font = 'bold 10px sans-serif';
-          ctx.fillText(alert.event_type.toUpperCase(), x + 5, 15);
+          ctx.fillText(alert.type.toUpperCase(), x + 5, 15);
         }
       });
-
-      // UI Chrome
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
-      ctx.fillRect(5, 5, 60, 20);
-      ctx.fillStyle = '#1f2937';
-      ctx.font = 'bold 12px sans-serif';
-      ctx.fillText(channelId, 10, 20);
-
-      animationId = requestAnimationFrame(render);
     };
 
-    render();
-
-    return () => {
-      cancelAnimationFrame(animationId);
-    };
-  }, [buffer, width, height, channelId, windowSeconds, sampleRate, autoScale, alerts]);
+    const interval = setInterval(render, 30);
+    return () => clearInterval(interval);
+  }, [buffer, width, height, windowSeconds, sampleRate, autoScale, alerts, channelId]);
 
   return (
-    <canvas
-      ref={canvasRef}
-      style={{ width: `${width}px`, height: `${height}px` }}
-      className="rounded-lg bg-gray-50 border border-gray-200 shadow-inner"
-    />
+    <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+      <div className="px-4 py-2 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
+        <span className="font-bold text-slate-700 text-sm tracking-widest">{channelId}</span>
+        <span className="text-[10px] font-black text-slate-400 uppercase tracking-tighter">Live Waveform</span>
+      </div>
+      <canvas 
+        ref={canvasRef} 
+        width={width} 
+        height={height}
+        className="w-full h-auto block"
+      />
+    </div>
   );
 };
 

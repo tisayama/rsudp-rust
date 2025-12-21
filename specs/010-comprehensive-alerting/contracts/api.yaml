@@ -1,0 +1,76 @@
+openapi: 3.0.0
+info:
+  title: rsudp-rust Alerting API
+  version: 1.0.0
+paths:
+  /api/alerts:
+    get:
+      summary: Retrieve alert history
+      description: Returns a list of alerts from the last 24 hours.
+      responses:
+        '200':
+          description: A list of alert events
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AlertEvent'
+  /api/alerts/settings:
+    get:
+      summary: Get current alert settings
+      responses:
+        '200':
+          description: Current configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertSettings'
+    put:
+      summary: Update alert settings
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AlertSettings'
+      responses:
+        '200':
+          description: Settings updated
+  /images/alerts/{filename}:
+    get:
+      summary: Serve alert snapshot PNG
+      parameters:
+        - name: filename
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: PNG image
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+
+components:
+  schemas:
+    AlertEvent:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        channel: { type: string }
+        trigger_time: { type: string, format: date-time }
+        reset_time: { type: string, format: date-time }
+        max_ratio: { type: number }
+        snapshot_url: { type: string }
+    AlertSettings:
+      type: object
+      properties:
+        audio_enabled: { type: boolean }
+        email_enabled: { type: boolean }
+        flash_enabled: { type: boolean }
+        smtp_host: { type: string }
+        smtp_port: { type: integer }
+        email_recipient: { type: string }

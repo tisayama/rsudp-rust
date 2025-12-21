@@ -50,4 +50,13 @@ export class RingBuffer {
     }
     return result;
   }
+
+  getTail(count: number): Float32Array {
+    const len = Math.min(count, this.length);
+    const result = new Float32Array(len);
+    for (let i = 0; i < len; i++) {
+      result[i] = this.get(this.length - len + i);
+    }
+    return result;
+  }
 }

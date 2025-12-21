@@ -22,6 +22,16 @@ export const useWebSocket = (url: string) => {
     };
 
     socket.onmessage = async (event) => {
+      if (typeof event.data === 'string') {
+        try {
+          const msg = JSON.parse(event.data) as WsMessage;
+          setLastMessage(msg);
+        } catch (e) {
+          console.error('Failed to parse WebSocket message:', e);
+        }
+        return;
+      }
+
       if (event.data instanceof ArrayBuffer) {
         const view = new DataView(event.data);
         const type = view.getUint8(0);

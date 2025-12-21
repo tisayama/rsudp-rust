@@ -1,5 +1,6 @@
 use crate::intensity::IntensityResult;
 use crate::trigger::AlertEvent;
+use crate::web::history::{AlertHistoryManager, SharedHistory};
 use axum::{
     extract::ws::Message,
     extract::{State, WebSocketUpgrade},
@@ -8,8 +9,9 @@ use axum::{
 use chrono::{DateTime, Utc};
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use tokio::sync::broadcast;
+
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlotSettings {
@@ -26,12 +28,24 @@ pub enum WsMessage {
     },
     Alert(AlertEvent),
     Intensity(IntensityResult),
+    AlertStart {
+        id: uuid::Uuid,
+        channel: String,
+        timestamp: DateTime<Utc>,
+    },
+    AlertEnd {
+        id: uuid::Uuid,
+        channel: String,
+        timestamp: DateTime<Utc>,
+        max_ratio: f64,
+    },
 }
 
 #[derive(Clone)]
 pub struct WebState {
     pub tx: broadcast::Sender<WsMessage>,
     pub settings: Arc<RwLock<PlotSettings>>,
+    pub history: SharedHistory,
 }
 
 impl Default for WebState {
@@ -46,6 +60,7 @@ impl WebState {
         Self {
             tx,
             settings: Arc::new(RwLock::new(PlotSettings { scale: 1.0 })),
+            history: Arc::new(Mutex::new(AlertHistoryManager::new())),
         }
     }
 
@@ -72,6 +87,14 @@ impl WebState {
 
     pub async fn broadcast_intensity(&self, res: IntensityResult) {
         let _ = self.tx.send(WsMessage::Intensity(res));
+    }
+
+    pub async fn broadcast_alert_start(&self, id: uuid::Uuid, channel: String, timestamp: DateTime<Utc>) {
+        let _ = self.tx.send(WsMessage::AlertStart { id, channel, timestamp });
+    }
+
+    pub async fn broadcast_alert_end(&self, id: uuid::Uuid, channel: String, timestamp: DateTime<Utc>, max_ratio: f64) {
+        let _ = self.tx.send(WsMessage::AlertEnd { id, channel, timestamp, max_ratio });
     }
 }
 
