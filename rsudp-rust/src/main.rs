@@ -82,10 +82,13 @@ async fn main() {
 
     // 3. Setup Configs
     let trigger_config = TriggerConfig {
-        sta_sec: 1.0,
-        lta_sec: 10.0,
-        threshold: 3.0,
-        reset_threshold: 1.5,
+        sta_sec: 6.0,
+        lta_sec: 30.0,
+        threshold: 1.1,
+        reset_threshold: 0.5,
+        highpass: 0.1,
+        lowpass: 2.0,
+        target_channel: "EHZ".to_string(),
     };
 
     let target_channels: Vec<String> = args.channels.split(',').map(|s| s.to_string()).collect();
@@ -105,11 +108,12 @@ async fn main() {
     };
 
     // 4. Simulation or Live UDP mode
+    let sm = sens_map.clone();
     if let Some(path) = args.file {
         tracing::info!("Simulation mode: processing file {}", path);
         let ws = web_state.clone();
         let pipeline_handle = tokio::spawn(async move {
-            run_pipeline(pipe_rx, trigger_config, intensity_config, ws).await;
+            run_pipeline(pipe_rx, trigger_config, intensity_config, ws, sm).await;
         });
 
         let bytes = std::fs::read(&path).unwrap();
@@ -125,7 +129,7 @@ async fn main() {
         // LIVE UDP MODE
         let ws = web_state.clone();
         tokio::spawn(async move {
-            run_pipeline(pipe_rx, trigger_config, intensity_config, ws).await;
+            run_pipeline(pipe_rx, trigger_config, intensity_config, ws, sm).await;
         });
 
         let (recv_tx, mut recv_rx) = mpsc::channel(100);

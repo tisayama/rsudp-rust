@@ -1,6 +1,6 @@
 use crate::web::stream::{PlotSettings, WebState};
 use crate::web::alerts::{AlertEvent, AlertSettings};
-use axum::{Json, Router, extract::{State, Path}, routing::get, routing::put};
+use axum::{Json, Router, extract::{State}, routing::get};
 use tower_http::cors::CorsLayer;
 use tower_http::services::ServeDir;
 

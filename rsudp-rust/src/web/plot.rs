@@ -1,0 +1,247 @@
+use rustfft::{FftPlanner, num_complex::Complex};
+use plotters::prelude::*;
+use chrono::{DateTime, Utc};
+use std::collections::HashMap;
+use std::fs;
+
+pub struct Spectrogram {
+    pub frequencies: Vec<f64>,
+    pub times: Vec<f64>,
+    pub data: Vec<Vec<f64>>, // [time][frequency]
+}
+
+pub fn compute_spectrogram(samples: &[f64], sample_rate: f64, nfft: usize, noverlap: usize) -> Spectrogram {
+    let mut planner = FftPlanner::new();
+    let fft = planner.plan_fft_forward(nfft);
+    
+    let step = nfft - noverlap;
+    let mut data = Vec::new();
+    let mut times = Vec::new();
+    
+    // Hanning window
+    let window: Vec<f64> = (0..nfft)
+        .map(|i| 0.5 * (1.0 - (2.0 * std::f64::consts::PI * i as f64 / (nfft - 1) as f64).cos()))
+        .collect();
+
+    // The time of a segment is typically the center or the end. 
+    // Matplotlib specgram centers it by default. 
+    // Here we align to the start of the window + half window size for center alignment.
+    let time_offset = (nfft as f64 / 2.0) / sample_rate;
+
+    for i in (0..samples.len().saturating_sub(nfft)).step_by(step) {
+        let chunk = &samples[i..i + nfft];
+        if chunk.len() < nfft { break; }
+        
+        let mean = chunk.iter().sum::<f64>() / nfft as f64;
+        
+        let mut buffer: Vec<Complex<f64>> = chunk.iter().zip(window.iter())
+            .map(|(&s, &w)| Complex { re: (s - mean) * w, im: 0.0 })
+            .collect();
+            
+        fft.process(&mut buffer);
+        
+        let psd: Vec<f64> = buffer.iter().take(nfft / 2 + 1)
+            .map(|c| {
+                let mag_sq = c.re * c.re + c.im * c.im;
+                mag_sq
+            })
+            .collect();
+            
+        data.push(psd);
+        times.push((i as f64 / sample_rate) + time_offset);
+    }
+    
+    let frequencies: Vec<f64> = (0..nfft / 2 + 1)
+        .map(|i| i as f64 * sample_rate / nfft as f64)
+        .collect();
+        
+    Spectrogram { frequencies, times, data }
+}
+
+pub fn draw_rsudp_plot(
+    path: &str,
+    station: &str,
+    channel_data: &HashMap<String, Vec<f64>>,
+    start_time: DateTime<Utc>,
+    sample_rate: f64,
+    sensitivity: Option<f64>, // If provided, convert counts to physical units
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Bake the font into the binary for static lifetime
+    const FONT_DATA: &[u8] = include_bytes!("/usr/share/fonts/truetype/dejavu/DejaVuSansCondensed.ttf");
+    let _ = plotters::style::register_font("sans-serif", FontStyle::Normal, FONT_DATA);
+
+    let n_channels = channel_data.len();
+    let width = 1000;
+    let height = 500 * n_channels as u32;
+
+    // rsudp Dark Theme Colors
+    let bg_color = RGBColor(32, 37, 48); // #202530
+    let fg_color = RGBColor(204, 204, 204); // 0.8 grey
+    let line_color = RGBColor(194, 130, 133); // #c28285 pinkish
+    let grid_color = RGBColor(60, 65, 75); // Darker grey for grid
+
+    let root = BitMapBackend::new(path, (width, height)).into_drawing_area();
+    root.fill(&bg_color)?;
+
+    let label_style = TextStyle::from(("sans-serif", 12).into_font()).color(&fg_color);
+    let title_style = TextStyle::from(("sans-serif", 18).into_font()).color(&fg_color);
+
+    let colormap_lut: Vec<RGBColor> = (0..256)
+        .map(|i| {
+            let color = colorous::INFERNO.eval_rational(i, 255);
+            RGBColor(color.r, color.g, color.b)
+        })
+        .collect();
+
+    let channel_areas = root.split_evenly((n_channels, 1));
+
+    let mut sorted_channels: Vec<_> = channel_data.keys().collect();
+    sorted_channels.sort_by(|a, b| {
+        let order = |s: &str| {
+            if s.ends_with('Z') { 0 }
+            else if s.ends_with('E') { 1 }
+            else if s.ends_with('N') { 2 }
+            else { 3 }
+        };
+        order(a).cmp(&order(b)).then(a.cmp(b))
+    });
+
+    for (i, &chan) in sorted_channels.iter().enumerate() {
+        let raw_samples = &channel_data[chan];
+        
+        // 1. Demean (remove DC offset)
+        let mean_val = raw_samples.iter().sum::<f64>() / raw_samples.len() as f64;
+        let mut samples: Vec<f64> = raw_samples.iter().map(|&s| s - mean_val).collect();
+
+        // 2. Apply Sensitivity (Physical Units)
+        let unit_label = if let Some(sens) = sensitivity {
+            if sens > 0.0 {
+                for s in &mut samples {
+                    *s /= sens;
+                }
+                // RS4D sensors are usually Velocity (m/s) or Acceleration (m/s^2)
+                // Assuming Velocity if sensitivity is high (~3-4e8), Accel if lower (~3e5)
+                if sens > 1_000_000.0 { "Velocity (m/s)" } else { "Accel (m/s²)" }
+            } else {
+                "Counts"
+            }
+        } else {
+            "Counts"
+        };
+
+        let total_seconds = samples.len() as f64 / sample_rate;
+        let channel_area = &channel_areas[i];
+        let (waveform_area, spectrogram_area) = channel_area.split_vertically(250);
+
+        let pga = samples.iter().fold(0.0f64, |a, &b| a.max(b.abs()));
+
+        // Draw Waveform
+        let y_limit = if pga > 0.0 { pga * 1.1 } else { 1000.0 };
+
+        let mut chart = ChartBuilder::on(&waveform_area)
+            .caption(
+                format!("{} - {} | Peak: {:.2e} | Start: {}", station, chan, pga, start_time.format("%Y-%m-%d %H:%M:%S UTC")), 
+                title_style.clone()
+            )
+            .margin_left(20)
+            .margin_right(20)
+            .margin_top(10)
+            .set_label_area_size(LabelAreaPosition::Left, 70) // Increased for scientific notation
+            .build_cartesian_2d(0.0..total_seconds, -y_limit..y_limit)?;
+
+        chart
+            .configure_mesh()
+            .light_line_style(grid_color)
+            .bold_line_style(grid_color)
+            .axis_style(ShapeStyle::from(&fg_color).stroke_width(1))
+            .y_desc(unit_label)
+            .axis_desc_style(label_style.clone())
+            .label_style(label_style.clone())
+            .draw()?;
+
+        chart.draw_series(LineSeries::new(
+            samples.iter().enumerate().map(|(i, &s)| (i as f64 / sample_rate, s)),
+            line_color.stroke_width(1),
+        ))?;
+
+        // Draw Spectrogram
+        let nfft = 128; 
+        let overlap = (nfft as f64 * 0.9) as usize; 
+        // Note: compute_spectrogram already does local demeaning per window
+        let spec = compute_spectrogram(&samples, sample_rate, nfft, overlap);
+        
+        if !spec.data.is_empty() {
+            let mut max_mag_sq = 1e-10;
+            for row in &spec.data {
+                for &val in row {
+                    if val > max_mag_sq { max_mag_sq = val; }
+                }
+            }
+
+            let mut spec_chart = ChartBuilder::on(&spectrogram_area)
+                .margin_left(20)
+                .margin_right(20)
+                .margin_bottom(40)
+                .set_label_area_size(LabelAreaPosition::Left, 70)
+                .set_label_area_size(LabelAreaPosition::Bottom, 30)
+                .build_cartesian_2d(0.0..total_seconds, 0.0..sample_rate / 2.0)?;
+
+            spec_chart
+                .configure_mesh()
+                .disable_mesh()
+                .axis_style(ShapeStyle::from(&fg_color).stroke_width(1))
+                .x_desc("Seconds from start")
+                .y_desc("Freq [Hz]")
+                .axis_desc_style(label_style.clone())
+                .label_style(label_style.clone())
+                .draw()?;
+
+            let x_step = if spec.times.len() > 1 { spec.times[1] - spec.times[0] } else { 1.0 };
+            let y_step = spec.frequencies[1] - spec.frequencies[0];
+
+            for (t_idx, t) in spec.times.iter().enumerate() {
+                for (f_idx, f) in spec.frequencies.iter().enumerate() {
+                    let mag_sq = spec.data[t_idx][f_idx];
+                    
+                    // rsudp power law scaling
+                    let intensity = (mag_sq / max_mag_sq).powf(0.1);
+                    
+                    let lut_idx = (intensity * 255.0) as usize;
+                    let plot_color = colormap_lut[lut_idx.min(255)];
+                    
+                    // Center the rectangle on the time point
+                    let t_start = t - (x_step / 2.0);
+                    let t_end = t + (x_step / 2.0);
+
+                    spec_chart.draw_series(std::iter::once(Rectangle::new(
+                        [(t_start, *f), (t_end, *f + y_step)],
+                        plot_color.filled(),
+                    )))?;
+                }
+            }
+        }
+    }
+
+    root.present()?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_spectrogram_dimensions() {
+        let sample_rate = 100.0;
+        let nfft = 256;
+        let noverlap = 128;
+        let seconds = 10.0;
+        let samples: Vec<f64> = (0..(seconds * sample_rate) as usize).map(|i| (i as f64).sin()).collect();
+        
+        let spec = compute_spectrogram(&samples, sample_rate, nfft, noverlap);
+        
+        assert_eq!(spec.frequencies.len(), nfft / 2 + 1);
+        assert!(!spec.data.is_empty());
+        assert_eq!(spec.data[0].len(), nfft / 2 + 1);
+    }
+}

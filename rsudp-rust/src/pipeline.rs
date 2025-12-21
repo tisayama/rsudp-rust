@@ -13,13 +13,14 @@ pub async fn run_pipeline(
     trigger_config: TriggerConfig,
     intensity_config: Option<IntensityConfig>,
     web_state: WebState,
+    sensitivity_map: HashMap<String, f64>,
 ) {
     info!("Pipeline started");
     let mut tm = TriggerManager::new(trigger_config);
     let mut im = intensity_config.map(IntensityManager::new);
     let mut active_alerts: HashMap<String, Uuid> = HashMap::new();
     let mut waveform_buffers: HashMap<String, VecDeque<f64>> = HashMap::new();
-    let max_buffer_samples = (100.0 * 60.0) as usize; // 60 seconds at 100Hz
+    let max_buffer_samples = (100.0 * 300.0) as usize; // 300 seconds at 100Hz
 
     while let Some(data) = receiver.recv().await {
         let segments = match parse_any(&data) {
@@ -42,8 +43,9 @@ pub async fn run_pipeline(
 
             // 1. STA/LTA Triggering
             let id = format!("{}.{}.{}.{}", segment.network, segment.station, segment.location, segment.channel);
+            let sensitivity = sensitivity_map.get(&segment.channel).cloned().unwrap_or(1.0);
             for &sample in &segment.samples {
-                if let Some(alert) = tm.add_sample(&id, sample, segment.starttime) {
+                if let Some(alert) = tm.add_sample(&id, sample, segment.starttime, sensitivity) {
                     match alert.event_type {
                         AlertEventType::Trigger => {
                             let alert_id = Uuid::new_v4();
@@ -83,14 +85,34 @@ pub async fn run_pipeline(
                                 };
 
                                 let ch = segment.channel.clone();
+                                let sta = segment.station.clone();
                                 let ts = alert.timestamp;
                                 let ratio = alert.ratio;
-                                let samples: Vec<f64> = waveform_buffers.get(&ch).map(|b| b.iter().cloned().collect()).unwrap_or_default();
+                                
+                                // 3. Get sensitivity if available
+                                let sensitivity = if let Some(im) = &im {
+                                    im.config().sensitivities.first().cloned()
+                                } else {
+                                    None
+                                };
+
+                                // 2. Generate snapshot
+                                let snapshot_window_seconds = 90.0;
+                                let snapshot_samples = (100.0 * snapshot_window_seconds) as usize;
+
+                                // Prepare trimmed data for all channels
+                                let mut trimmed_data: HashMap<String, Vec<f64>> = HashMap::new();
+                                for (chan, buf) in &waveform_buffers {
+                                    let start_idx = buf.len().saturating_sub(snapshot_samples);
+                                    let samples: Vec<f64> = buf.range(start_idx..).cloned().collect();
+                                    trimmed_data.insert(chan.clone(), samples);
+                                }
+
                                 let shared_state = web_state.clone();
 
                                 tokio::spawn(async move {
-                                    // 1. Generate snapshot
-                                    let snapshot_path = match crate::web::alerts::generate_snapshot(alert_id, &ch, &samples) {
+                                    // 1. Generate snapshot (all channels)
+                                    let snapshot_path = match crate::web::alerts::generate_snapshot(alert_id, &sta, &trimmed_data, trigger_time, sensitivity) {
                                         Ok(path) => {
                                             let mut history = shared_state.history.lock().unwrap();
                                             history.set_snapshot_path(alert_id, path.clone());

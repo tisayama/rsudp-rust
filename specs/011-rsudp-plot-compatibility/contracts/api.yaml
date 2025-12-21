@@ -1,0 +1,3 @@
+# No public API changes required for this feature.
+# The generated images are served via the existing static file endpoint.
+# Internal logic changes only.

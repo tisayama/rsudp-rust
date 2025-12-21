@@ -1,7 +1,6 @@
 use chrono::{DateTime, Utc};
 use lettre::transport::smtp::authentication::Credentials;
 use lettre::{Message, SmtpTransport, Transport};
-use plotters::prelude::*;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -111,47 +110,70 @@ pub fn send_reset_email(
     Ok(())
 }
 
+use crate::web::plot::draw_rsudp_plot;
+
+use std::collections::HashMap;
+
+
+
 pub fn generate_snapshot(
+
+
+
     id: Uuid,
-    channel: &str,
-    samples: &[f64],
+
+
+
+    station: &str,
+
+
+
+    channel_data: &HashMap<String, Vec<f64>>,
+
+
+
+    start_time: DateTime<Utc>,
+
+
+
+    sensitivity: Option<f64>,
+
+
+
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let filename = format!("{}_{}.png", id, channel);
+
+
+
+    let filename = format!("{}.png", id); // No channel in filename if it's a composite
+
+
+
     let path = format!("alerts/{}", filename);
 
-    // Matplotlib-like colors
-    let bg_color = RGBColor(255, 255, 255);
-    let line_color = RGBColor(31, 119, 180); // Matplotlib Tab10 Blue
-    let grid_color = RGBColor(220, 220, 220);
 
-    let root = BitMapBackend::new(&path, (1000, 500)).into_drawing_area();
-    root.fill(&bg_color)?;
 
-    // Find dynamic scale
-    let max_val = samples.iter().fold(0.0f64, |a, &b| a.max(b.abs()));
-    let y_limit = if max_val > 0.0 { max_val * 1.1 } else { 1000.0 };
 
-    let mut chart = ChartBuilder::on(&root)
-        .margin(20)
-        .set_label_area_size(LabelAreaPosition::Left, 60)
-        .set_label_area_size(LabelAreaPosition::Bottom, 40)
-        .build_cartesian_2d(0..samples.len(), -y_limit..y_limit)?;
 
-    chart
-        .configure_mesh()
-        .disable_x_mesh() // Use custom vertical lines if needed, or stick to simple
-        .light_line_style(grid_color)
-        .x_desc("Samples (100Hz)")
-        .y_desc("Amplitude (Counts)")
-        .axis_desc_style(("sans-serif", 15))
-        .draw()?;
 
-    chart.draw_series(LineSeries::new(
-        samples.iter().enumerate().map(|(i, &s)| (i, s)),
-        line_color.stroke_width(1),
-    ))?;
 
-    root.present()?;
+    draw_rsudp_plot(&path, station, channel_data, start_time, 100.0, sensitivity)?;
+
+
+
+
+
+
 
     Ok(filename)
+
+
+
 }
+
+
+
+
+
+
+
+
