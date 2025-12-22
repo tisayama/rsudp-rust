@@ -29,6 +29,7 @@ Auto-generated from all feature plans. Last updated: 2025-12-19
 - In-memory (24h alert history) (013-alert-message-intensity)
 - Rust 1.7x + `tokio` (Timers, Tasks), `uuid`, `chrono` (014-rsudp-alert-timing)
 - N/A (In-memory state) (014-rsudp-alert-timing)
+- Rust 1.7x + `plotters`, `chrono` (015-fix-plot-timestamp)
 
 - Rust 1.7x (latest stable) + None (requires Rust toolchain: `rustc`, `cargo`) (001-init-rust-project)
 
@@ -48,9 +49,9 @@ cargo test [ONLY COMMANDS FOR ACTIVE TECHNOLOGIES][ONLY COMMANDS FOR ACTIVE TECH
 Rust 1.7x (latest stable): Follow standard conventions
 
 ## Recent Changes
+- 015-fix-plot-timestamp: Added Rust 1.7x + `plotters`, `chrono`
 - 014-rsudp-alert-timing: Added Rust 1.7x + `tokio` (Timers, Tasks), `uuid`, `chrono`
 - 014-rsudp-alert-timing: Added [if applicable, e.g., PostgreSQL, CoreData, files or N/A]
-- 013-alert-message-intensity: Added Rust 1.7x (Backend) + `rsudp-rust` internal modules (trigger, pipeline, alerts)
 
 
 <!-- MANUAL ADDITIONS START -->

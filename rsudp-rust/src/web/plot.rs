@@ -56,6 +56,11 @@ pub fn compute_spectrogram(samples: &[f64], sample_rate: f64, nfft: usize, nover
     Spectrogram { frequencies, times, data }
 }
 
+fn format_utc_timestamp(start_time: DateTime<Utc>, seconds: f64) -> String {
+    let dt = start_time + chrono::Duration::milliseconds((seconds * 1000.0) as i64);
+    dt.format("%H:%M:%S").to_string()
+}
+
 fn get_jma_color(shindo: &str) -> RGBColor {
     match shindo {
         "0" => RGBColor(242, 242, 255),
@@ -108,7 +113,6 @@ pub fn draw_rsudp_plot(
     let bg_color = RGBColor(32, 37, 48); // #202530
     let fg_color = RGBColor(204, 204, 204); // 0.8 grey
     let line_color = RGBColor(194, 130, 133); // #c28285 pinkish
-    let grid_color = RGBColor(60, 65, 75); // Darker grey for grid
 
     let root = BitMapBackend::new(path, (width, height)).into_drawing_area();
     root.fill(&bg_color)?;
@@ -177,9 +181,8 @@ pub fn draw_rsudp_plot(
 
         chart
             .configure_mesh()
-            .light_line_style(grid_color)
-            .bold_line_style(grid_color)
-            .axis_style(ShapeStyle::from(&fg_color).stroke_width(1))
+            .disable_mesh() // T006: Disable grid for Waveform
+            .disable_x_axis() // T005: Hide X-axis for Waveform
             .y_desc(unit_label)
             .axis_desc_style(label_font.clone())
             .label_style(label_font.clone())
@@ -215,10 +218,12 @@ pub fn draw_rsudp_plot(
                 .configure_mesh()
                 .disable_mesh()
                 .axis_style(ShapeStyle::from(&fg_color).stroke_width(1))
-                .x_desc("Seconds from start")
+                .x_desc("Time (UTC)")
                 .y_desc("Freq [Hz]")
                 .axis_desc_style(label_font.clone())
                 .label_style(label_font.clone())
+                .x_labels(6) // T009: Limit labels to 6 to prevent overlapping
+                .x_label_formatter(&|x| format_utc_timestamp(start_time, *x))
                 .draw()?;
 
             let x_step = if spec.times.len() > 1 { spec.times[1] - spec.times[0] } else { 1.0 };
