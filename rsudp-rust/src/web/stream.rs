@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, RwLock};
 use tokio::sync::broadcast;
-use tracing::{info, warn, debug};
+use tracing::{warn, debug};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlotSettings {

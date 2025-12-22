@@ -1,7 +1,7 @@
 use rustfft::{FftPlanner, num_complex::Complex};
 use plotters::prelude::*;
 use plotters::style::text_anchor::{Pos, HPos, VPos};
-use chrono::{DateTime, Utc, Duration, TimeZone};
+use chrono::{DateTime, Utc, TimeZone};
 use std::collections::HashMap;
 use crate::intensity::get_shindo_class;
 use tracing::info;

@@ -5,9 +5,11 @@ use rsudp_rust::web::WebState;
 use rsudp_rust::receiver::start_receiver;
 use rsudp_rust::parser::stationxml::fetch_sensitivity;
 use rsudp_rust::parser::mseed::parse_mseed_file;
+use rsudp_rust::settings::Settings;
 use tokio::sync::mpsc;
 use clap::Parser;
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -16,33 +18,41 @@ struct Args {
     #[arg(short, long)]
     file: Option<String>,
 
-    /// Network code (used if no file is provided)
-    #[arg(short, long, default_value = "AM")]
-    network: String,
+    /// Path to configuration file (TOML/YAML)
+    #[arg(short, long)]
+    config: Option<PathBuf>,
 
-    /// Station name (used if no file is provided)
-    #[arg(short, long, default_value = "S9AF3")]
-    station: String,
+    /// Dump default configuration to file and exit
+    #[arg(long)]
+    dump_config: Option<PathBuf>,
 
-    /// Channels for intensity calculation (must be 3)
-    #[arg(short, long, default_value = "ENE,ENN,ENZ")]
-    channels: String,
+    /// Network code (overrides config)
+    #[arg(short, long)]
+    network: Option<String>,
 
-    /// WebUI port
-    #[arg(short, long, default_value_t = 8081)]
-    web_port: u16,
+    /// Station name (overrides config)
+    #[arg(short, long)]
+    station: Option<String>,
 
-    /// UDP port for receiver
-    #[arg(short, long, default_value_t = 12345)]
-    udp_port: u16,
+    /// Channels for intensity calculation (must be 3, overrides config)
+    #[arg(short, long)]
+    channels: Option<String>,
 
-    /// Seconds of data to display in plot
-    #[arg(long, default_value_t = 90.0)]
-    window_seconds: f64,
+    /// WebUI port (overrides config)
+    #[arg(short, long)]
+    web_port: Option<u16>,
 
-    /// Ratio of duration to wait before posting (0.0 to 1.0)
-    #[arg(long, default_value_t = 0.7)]
-    save_pct: f64,
+    /// UDP port for receiver (overrides config)
+    #[arg(short, long)]
+    udp_port: Option<u16>,
+
+    /// Seconds of data to display in plot (overrides config)
+    #[arg(long)]
+    window_seconds: Option<f64>,
+
+    /// Ratio of duration to wait before posting (overrides config)
+    #[arg(long)]
+    save_pct: Option<f64>,
 }
 
 #[tokio::main]
@@ -50,25 +60,60 @@ async fn main() {
     tracing_subscriber::fmt::init();
     let args = Args::parse();
 
+    // 1. Handle Config Dumping
+    if let Some(dump_path) = args.dump_config {
+        let default_settings = Settings::default();
+        let format = dump_path.extension().and_then(|e| e.to_str()).unwrap_or("toml");
+        match default_settings.dump(format) {
+            Ok(content) => {
+                if let Err(e) = std::fs::write(&dump_path, content) {
+                    eprintln!("Error writing config: {}", e);
+                    std::process::exit(1);
+                }
+                println!("Default configuration dumped to {:?}", dump_path);
+                std::process::exit(0);
+            }
+            Err(e) => {
+                eprintln!("Error generating config: {}", e);
+                std::process::exit(1);
+            }
+        }
+    }
+
+    // 2. Load Settings
+    let mut settings = match Settings::new(args.config) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Error loading configuration: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    // 3. Override Settings with CLI Args
+    if let Some(p) = args.udp_port { settings.settings.port = p; }
+    if let Some(s) = args.station { settings.settings.station = s; }
+    // Note: window_seconds and save_pct are merged below into web_state and config
+
     let web_state = WebState::new();
     {
-        let mut settings = web_state.settings.write().unwrap();
-        settings.window_seconds = args.window_seconds;
-        settings.save_pct = args.save_pct;
+        let mut ws_settings = web_state.settings.write().unwrap();
+        ws_settings.window_seconds = args.window_seconds.unwrap_or(settings.plot.duration as f64);
+        ws_settings.save_pct = args.save_pct.unwrap_or(0.7); // Fallback to 0.7 if not in settings or CLI
     }
     
     // Update default history settings as well
     {
         let mut history = web_state.history.lock().unwrap();
         let mut h_settings = history.get_settings();
-        h_settings.save_pct = args.save_pct;
+        h_settings.save_pct = args.save_pct.unwrap_or(0.7);
         history.update_settings(h_settings);
     }
 
     let (pipe_tx, pipe_rx) = mpsc::channel(100);
 
     // 1. Start Web Server
-    let addr = format!("0.0.0.0:{}", args.web_port);
+    let web_port = args.web_port.unwrap_or(8081); // Default to 8081 if not specified
+    let addr = format!("0.0.0.0:{}", web_port);
     let app_state = web_state.clone();
     tokio::spawn(async move {
         let router = rsudp_rust::web::routes::create_router(app_state).await;
@@ -78,14 +123,15 @@ async fn main() {
     });
 
     // 2. Determine target station and fetch metadata
+    let net = args.network.unwrap_or_else(|| "AM".to_string());
     let (net, sta) = if let Some(path) = &args.file {
         // Peek at file to find station
         match parse_mseed_file(path) {
             Ok(segs) if !segs.is_empty() => (segs[0].network.clone(), segs[0].station.clone()),
-            _ => (args.network.clone(), args.station.clone()),
+            _ => (net, settings.settings.station.clone()),
         }
     } else {
-        (args.network.clone(), args.station.clone())
+        (net, settings.settings.station.clone())
     };
 
     tracing::info!("Using metadata for Station: {}.{}", net, sta);
@@ -104,16 +150,17 @@ async fn main() {
 
     // 2. Setup Configs
     let trigger_config = TriggerConfig {
-        sta_sec: 6.0,
-        lta_sec: 30.0,
-        threshold: 1.05,
-        reset_threshold: 0.5,
-        highpass: 0.1,
-        lowpass: 2.0,
-        target_channel: "EHZ".to_string(),
+        sta_sec: settings.alert.sta,
+        lta_sec: settings.alert.lta,
+        threshold: settings.alert.threshold,
+        reset_threshold: settings.alert.reset,
+        highpass: settings.alert.highpass,
+        lowpass: settings.alert.lowpass,
+        target_channel: settings.alert.channel.clone(),
     };
 
-    let target_channels: Vec<String> = args.channels.split(',').map(|s| s.to_string()).collect();
+    let channels_str = args.channels.unwrap_or_else(|| "ENE,ENN,ENZ".to_string());
+    let target_channels: Vec<String> = channels_str.split(',').map(|s| s.to_string()).collect();
     let intensity_config = if target_channels.len() == 3 {
         let mut sensitivities = Vec::new();
         for ch in &target_channels {
@@ -155,8 +202,9 @@ async fn main() {
         });
 
         let (recv_tx, mut recv_rx) = mpsc::channel(100);
+        let udp_port = settings.settings.port;
         tokio::spawn(async move {
-            if let Err(e) = start_receiver(args.udp_port, recv_tx).await {
+            if let Err(e) = start_receiver(udp_port, recv_tx).await {
                 tracing::error!("Receiver error: {}", e);
             }
         });

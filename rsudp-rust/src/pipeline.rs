@@ -1,6 +1,6 @@
 use tokio::sync::mpsc;
 use tracing::{info, warn};
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use crate::parser::{parse_any};
 use crate::trigger::{TriggerManager, TriggerConfig, AlertEventType};
 use crate::intensity::{IntensityManager, IntensityConfig};
@@ -169,7 +169,7 @@ pub async fn run_pipeline(
                             });
                         },
                         AlertEventType::Reset => {
-                            if let Some(alert_id) = active_alerts.remove(&id) {
+                            if let Some(_alert_id) = active_alerts.remove(&id) {
                                 info!("{}", alert);
                             }
                         }
