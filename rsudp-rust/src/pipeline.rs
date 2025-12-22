@@ -4,7 +4,7 @@ use std::collections::{HashMap, VecDeque};
 use crate::parser::{parse_any};
 use crate::trigger::{TriggerManager, TriggerConfig, AlertEventType};
 use crate::intensity::{IntensityManager, IntensityConfig};
-use crate::web::stream::WebState;
+use crate::web::stream::{WebState, ChannelBuffer};
 use crate::web::alerts::AlertEvent as WebAlertEvent;
 use uuid::Uuid;
 use std::time::Duration;
@@ -36,13 +36,10 @@ pub async fn run_pipeline(
             // 0. Update shared waveform buffers
             {
                 let mut buffers = web_state.waveform_buffers.lock().unwrap();
-                let buf = buffers.entry(segment.channel.clone()).or_insert_with(|| VecDeque::with_capacity(max_buffer_samples));
-                for &sample in &segment.samples {
-                    if buf.len() >= max_buffer_samples {
-                        buf.pop_front();
-                    }
-                    buf.push_back(sample);
-                }
+                let buf = buffers.entry(segment.channel.clone())
+                    .or_insert_with(|| ChannelBuffer::new(max_buffer_samples, segment.sampling_rate));
+                
+                buf.push_segment(segment.starttime, &segment.samples, max_buffer_samples);
             }
 
             // 1. STA/LTA Triggering
@@ -56,14 +53,17 @@ pub async fn run_pipeline(
                             let alert_id = Uuid::new_v4();
                             active_alerts.insert(id.clone(), alert_id);
                             
+                            info!("Triggered: {}. Acquiring max_ints lock...", id);
                             {
                                 let mut max_ints = web_state.alert_max_intensities.lock().unwrap();
                                 max_ints.insert(alert_id, -2.0);
                             }
+                            info!("Max ints lock released.");
                             
                             info!("{}", alert);
                             web_state.broadcast_alert_start(alert_id, segment.channel.clone(), alert.timestamp).await;
                             
+                            info!("Acquiring history lock...");
                             let (settings, trigger_time) = {
                                 let mut history = web_state.history.lock().unwrap();
                                 history.add_event(WebAlertEvent {
@@ -77,6 +77,7 @@ pub async fn run_pipeline(
                                 });
                                 (history.get_settings(), alert.timestamp)
                             };
+                            info!("History lock released.");
                             
                             // 1. Immediate Trigger Email
                             let ch = segment.channel.clone();
@@ -88,13 +89,18 @@ pub async fn run_pipeline(
                             });
 
                             // 2. Schedule Snapshot Generation & Summary Notification
+                            info!("Acquiring settings read lock...");
                             let plot_settings = web_state.settings.read().unwrap().clone();
+                            info!("Settings read lock released. Window: {}, SavePct: {}", plot_settings.window_seconds, plot_settings.save_pct);
+                            
                             let delay = Duration::from_secs_f64(plot_settings.window_seconds * plot_settings.save_pct);
                             let shared_state = web_state.clone();
                             let alert_ch = segment.channel.clone();
                             let alert_sta = segment.station.clone();
                             let s_map = sensitivity_map.clone();
                             let t_settings_reset = settings.clone();
+
+                            info!("Scheduling snapshot task. Delay: {:?}, Window: {}s, SavePct: {}", delay, plot_settings.window_seconds, plot_settings.save_pct);
 
                             tokio::spawn(async move {
                                 tokio::time::sleep(delay).await;
@@ -108,20 +114,36 @@ pub async fn run_pipeline(
                                 let intensity_message = crate::web::alerts::format_shindo_message(&shindo_class);
                                 let sens_opt = s_map.get(&alert_ch).cloned();
 
-                                let snapshot_samples = (100.0 * plot_settings.window_seconds) as usize;
-                                let mut trimmed_data: HashMap<String, Vec<f64>> = HashMap::new();
+                                // Calculate the target start time for the plot based on Trigger Time
+                                // Start = Trigger - (Window * (1 - Save%))
+                                let pre_trigger_duration = plot_settings.window_seconds * (1.0 - plot_settings.save_pct);
+                                let target_start_time = trigger_time - chrono::Duration::milliseconds((pre_trigger_duration * 1000.0) as i64);
                                 
-                                {
+                                info!("Snapshot Plan: Trigger={}, Window={}s, PreTrig={}s, TargetStart={}", 
+                                      trigger_time, plot_settings.window_seconds, pre_trigger_duration, target_start_time);
+
+                                let (trimmed_data, actual_start_time) = {
                                     let buffers = shared_state.waveform_buffers.lock().unwrap();
+                                    let mut data = HashMap::new();
+                                    let mut common_start_time = target_start_time; // Fallback
+
+                                    // Extract aligned window from all channels
                                     for (c, b) in buffers.iter() {
-                                        let start_idx = b.len().saturating_sub(snapshot_samples);
-                                        let samples: Vec<f64> = b.range(start_idx..).cloned().collect();
-                                        trimmed_data.insert(c.clone(), samples);
+                                        let (samples, st) = b.extract_window(target_start_time, plot_settings.window_seconds);
+                                        info!("Channel {}: Extracted {} samples starting at {}", c, samples.len(), st);
+                                        data.insert(c.clone(), samples);
+                                        // Use the start time from the triggering channel (or first found)
+                                        if c == &alert_ch {
+                                            common_start_time = st;
+                                        }
                                     }
-                                }
+                                    (data, common_start_time)
+                                };
+                                
+                                info!("Snapshot Execution: Actual Start Time passed to plot: {}", actual_start_time);
 
                                 // Generate snapshot
-                                let snapshot_path = match crate::web::alerts::generate_snapshot(alert_id, &alert_sta, &trimmed_data, trigger_time, sens_opt, max_int) {
+                                let snapshot_path = match crate::web::alerts::generate_snapshot(alert_id, &alert_sta, &trimmed_data, actual_start_time, sens_opt, max_int) {
                                     Ok(path) => {
                                         let mut history = shared_state.history.lock().unwrap();
                                         history.set_snapshot_path(alert_id, path.clone());
@@ -147,8 +169,8 @@ pub async fn run_pipeline(
                             });
                         },
                         AlertEventType::Reset => {
-                            if active_alerts.remove(&id).is_some() {
-                                info!("Alert state reset for {}", id);
+                            if let Some(alert_id) = active_alerts.remove(&id) {
+                                info!("{}", alert);
                             }
                         }
                     }

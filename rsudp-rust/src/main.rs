@@ -102,11 +102,11 @@ async fn main() {
         }
     };
 
-    // 3. Setup Configs
+    // 2. Setup Configs
     let trigger_config = TriggerConfig {
         sta_sec: 6.0,
         lta_sec: 30.0,
-        threshold: 1.1,
+        threshold: 1.05,
         reset_threshold: 0.5,
         highpass: 0.1,
         lowpass: 2.0,

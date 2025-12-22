@@ -1,9 +1,10 @@
 use rustfft::{FftPlanner, num_complex::Complex};
 use plotters::prelude::*;
 use plotters::style::text_anchor::{Pos, HPos, VPos};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Utc, Duration, TimeZone};
 use std::collections::HashMap;
 use crate::intensity::get_shindo_class;
+use tracing::info;
 
 pub struct Spectrogram {
     pub frequencies: Vec<f64>,
@@ -56,11 +57,6 @@ pub fn compute_spectrogram(samples: &[f64], sample_rate: f64, nfft: usize, nover
     Spectrogram { frequencies, times, data }
 }
 
-fn format_utc_timestamp(start_time: DateTime<Utc>, seconds: f64) -> String {
-    let dt = start_time + chrono::Duration::milliseconds((seconds * 1000.0) as i64);
-    dt.format("%H:%M:%S").to_string()
-}
-
 fn get_jma_color(shindo: &str) -> RGBColor {
     match shindo {
         "0" => RGBColor(242, 242, 255),
@@ -86,6 +82,8 @@ pub fn draw_rsudp_plot(
     sensitivity: Option<f64>,
     max_intensity: f64, // Explicitly passed from pipeline
 ) -> Result<(), Box<dyn std::error::Error>> {
+    info!("Drawing plot for {}. Start Time: {}, Sample Rate: {}", station, start_time, sample_rate);
+    
     // Bake the fonts into the binary for static lifetime
     const DEJAVU_FONT: &[u8] = include_bytes!("../resources/DejaVuSansCondensed.ttf");
     const NOTO_FONT: &[u8] = include_bytes!("../resources/NotoSansJP-Bold.otf");
@@ -160,6 +158,9 @@ pub fn draw_rsudp_plot(
         };
 
         let total_seconds = samples.len() as f64 / sample_rate;
+        let start_ts = start_time.timestamp_millis();
+        let end_ts = start_ts + (total_seconds * 1000.0) as i64;
+        
         let channel_area = &channel_areas[i];
         let (waveform_area, spectrogram_area) = channel_area.split_vertically(250);
 
@@ -177,7 +178,7 @@ pub fn draw_rsudp_plot(
             .margin_right(20)
             .margin_top(10)
             .set_label_area_size(LabelAreaPosition::Left, 70)
-            .build_cartesian_2d(0.0..total_seconds, -y_limit..y_limit)?;
+            .build_cartesian_2d(start_ts..end_ts, -y_limit..y_limit)?;
 
         chart
             .configure_mesh()
@@ -189,7 +190,10 @@ pub fn draw_rsudp_plot(
             .draw()?;
 
         chart.draw_series(LineSeries::new(
-            samples.iter().enumerate().map(|(i, &s)| (i as f64 / sample_rate, s)),
+            samples.iter().enumerate().map(|(i, &s)| {
+                let t = start_ts + ((i as f64 / sample_rate) * 1000.0) as i64;
+                (t, s)
+            }),
             line_color.stroke_width(1),
         ))?;
 
@@ -212,7 +216,7 @@ pub fn draw_rsudp_plot(
                 .margin_bottom(40)
                 .set_label_area_size(LabelAreaPosition::Left, 70)
                 .set_label_area_size(LabelAreaPosition::Bottom, 30)
-                .build_cartesian_2d(0.0..total_seconds, 0.0..sample_rate / 2.0)?;
+                .build_cartesian_2d(start_ts..end_ts, 0.0..sample_rate / 2.0)?;
 
             spec_chart
                 .configure_mesh()
@@ -222,24 +226,32 @@ pub fn draw_rsudp_plot(
                 .y_desc("Freq [Hz]")
                 .axis_desc_style(label_font.clone())
                 .label_style(label_font.clone())
-                .x_labels(6) // T009: Limit labels to 6 to prevent overlapping
-                .x_label_formatter(&|x| format_utc_timestamp(start_time, *x))
+                .x_labels(6)
+                .x_label_formatter(&|ms| {
+                    if let Some(dt) = Utc.timestamp_millis_opt(*ms).single() {
+                        dt.format("%H:%M:%S").to_string()
+                    } else {
+                        "".to_string()
+                    }
+                })
                 .draw()?;
 
-            let x_step = if spec.times.len() > 1 { spec.times[1] - spec.times[0] } else { 1.0 };
+            let x_step_ms = if spec.times.len() > 1 { ((spec.times[1] - spec.times[0]) * 1000.0) as i64 } else { 1000 };
             let y_step = spec.frequencies[1] - spec.frequencies[0];
 
-            for (t_idx, t) in spec.times.iter().enumerate() {
+            for (t_idx, t_sec) in spec.times.iter().enumerate() {
+                let t_center = start_ts + (t_sec * 1000.0) as i64;
+                let t_start = t_center - x_step_ms / 2;
+                let t_end = t_center + x_step_ms / 2;
+
                 for (f_idx, f) in spec.frequencies.iter().enumerate() {
                     let mag_sq = spec.data[t_idx][f_idx];
                     let intensity = (mag_sq / max_mag_sq).powf(0.1);
                     let lut_idx = (intensity * 255.0) as usize;
                     let plot_color = colormap_lut[lut_idx.min(255)];
-                    let t_start = t - (x_step / 2.0);
-                    let t_end = t + (x_step / 2.0);
 
                     spec_chart.draw_series(std::iter::once(Rectangle::new(
-                        [(t_start, *f), (t_end, *f + y_step)],
+                        [(t_start, *f), (t_end + 20, *f + y_step)], // Add 20ms overlap to prevent visual gaps
                         plot_color.filled(),
                     )))?;
                 }
