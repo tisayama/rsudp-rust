@@ -19,7 +19,7 @@ struct Args {
     file: Option<String>,
 
     /// Path to configuration file (TOML/YAML)
-    #[arg(short, long)]
+    #[arg(short = 'C', long)]
     config: Option<PathBuf>,
 
     /// Dump default configuration to file and exit
