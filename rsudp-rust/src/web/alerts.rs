@@ -12,6 +12,7 @@ pub struct AlertEvent {
     pub reset_time: Option<DateTime<Utc>>,
     pub max_ratio: f64,
     pub snapshot_path: Option<String>,
+    pub message: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,6 +39,21 @@ impl Default for AlertSettings {
             smtp_pass: "".to_string(),
             email_recipient: "".to_string(),
         }
+    }
+}
+
+pub fn format_shindo_message(shindo_class: &str) -> String {
+    if shindo_class == "0" {
+        "揺れを検出できませんでした".to_string()
+    } else {
+        let display_class = match shindo_class {
+            "5-" => "5弱",
+            "5+" => "5強",
+            "6-" => "6弱",
+            "6+" => "6強",
+            _ => shindo_class,
+        };
+        format!("震度 {}相当の揺れを検出しました", display_class)
     }
 }
 
@@ -77,14 +93,16 @@ pub fn send_reset_email(
     reset_time: DateTime<Utc>,
     max_ratio: f64,
     snapshot_url: Option<&str>,
+    intensity_message: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if !settings.email_enabled {
         return Ok(());
     }
 
     let mut body = format!(
-        "Seismic alert RESET on channel {}\nTriggered: {}\nReset: {}\nMax STA/LTA Ratio: {:.2}\n",
+        "Seismic alert RESET on channel {}\n\nSummary: {}\nTriggered: {}\nReset: {}\nMax STA/LTA Ratio: {:.2}\n",
         channel,
+        intensity_message,
         trigger_time,
         reset_time,
         max_ratio,
@@ -140,6 +158,10 @@ pub fn generate_snapshot(
 
 
 
+    max_intensity: f64,
+
+
+
 ) -> Result<String, Box<dyn std::error::Error>> {
 
 
@@ -156,7 +178,7 @@ pub fn generate_snapshot(
 
 
 
-    draw_rsudp_plot(&path, station, channel_data, start_time, 100.0, sensitivity)?;
+    draw_rsudp_plot(&path, station, channel_data, start_time, 100.0, sensitivity, max_intensity)?;
 
 
 

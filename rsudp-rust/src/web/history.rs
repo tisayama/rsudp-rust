@@ -27,10 +27,11 @@ impl AlertHistoryManager {
         }
     }
 
-    pub fn reset_event(&mut self, id: uuid::Uuid, reset_time: chrono::DateTime<Utc>, max_ratio: f64) {
+    pub fn reset_event(&mut self, id: uuid::Uuid, reset_time: chrono::DateTime<Utc>, max_ratio: f64, message: String) {
         if let Some(event) = self.events.iter_mut().find(|e| e.id == id) {
             event.reset_time = Some(reset_time);
             event.max_ratio = max_ratio;
+            event.message = Some(message);
         }
     }
 

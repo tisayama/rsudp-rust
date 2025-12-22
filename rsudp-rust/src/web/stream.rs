@@ -38,6 +38,7 @@ pub enum WsMessage {
         channel: String,
         timestamp: DateTime<Utc>,
         max_ratio: f64,
+        message: String,
     },
 }
 
@@ -93,8 +94,8 @@ impl WebState {
         let _ = self.tx.send(WsMessage::AlertStart { id, channel, timestamp });
     }
 
-    pub async fn broadcast_alert_end(&self, id: uuid::Uuid, channel: String, timestamp: DateTime<Utc>, max_ratio: f64) {
-        let _ = self.tx.send(WsMessage::AlertEnd { id, channel, timestamp, max_ratio });
+    pub async fn broadcast_alert_end(&self, id: uuid::Uuid, channel: String, timestamp: DateTime<Utc>, max_ratio: f64, message: String) {
+        let _ = self.tx.send(WsMessage::AlertEnd { id, channel, timestamp, max_ratio, message });
     }
 }
 

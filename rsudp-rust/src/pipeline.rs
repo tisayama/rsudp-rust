@@ -20,6 +20,7 @@ pub async fn run_pipeline(
     let mut im = intensity_config.map(IntensityManager::new);
     let mut active_alerts: HashMap<String, Uuid> = HashMap::new();
     let mut waveform_buffers: HashMap<String, VecDeque<f64>> = HashMap::new();
+    let mut alert_max_intensities: HashMap<Uuid, f64> = HashMap::new();
     let max_buffer_samples = (100.0 * 300.0) as usize; // 300 seconds at 100Hz
 
     while let Some(data) = receiver.recv().await {
@@ -43,33 +44,36 @@ pub async fn run_pipeline(
 
             // 1. STA/LTA Triggering
             let id = format!("{}.{}.{}.{}", segment.network, segment.station, segment.location, segment.channel);
-            let sensitivity = sensitivity_map.get(&segment.channel).cloned().unwrap_or(1.0);
+            let sensitivity = sensitivity_map.get(&segment.channel).cloned().unwrap_or(384500.0);
+            
             for &sample in &segment.samples {
                 if let Some(alert) = tm.add_sample(&id, sample, segment.starttime, sensitivity) {
                     match alert.event_type {
                         AlertEventType::Trigger => {
                             let alert_id = Uuid::new_v4();
                             active_alerts.insert(id.clone(), alert_id);
+                            alert_max_intensities.insert(alert_id, -2.0);
                             
                             info!("{}", alert);
                             web_state.broadcast_alert_start(alert_id, segment.channel.clone(), alert.timestamp).await;
                             
-                            let mut history = web_state.history.lock().unwrap();
-                            let settings = history.get_settings();
-                            history.add_event(WebAlertEvent {
-                                id: alert_id,
-                                channel: segment.channel.clone(),
-                                trigger_time: alert.timestamp,
-                                reset_time: None,
-                                max_ratio: alert.ratio,
-                                snapshot_path: None,
-                            });
+                            let (settings, trigger_time) = {
+                                let mut history = web_state.history.lock().unwrap();
+                                history.add_event(WebAlertEvent {
+                                    id: alert_id,
+                                    channel: segment.channel.clone(),
+                                    trigger_time: alert.timestamp,
+                                    reset_time: None,
+                                    max_ratio: alert.ratio,
+                                    snapshot_path: None,
+                                    message: None,
+                                });
+                                (history.get_settings(), alert.timestamp)
+                            };
                             
-                            // Send Trigger Email in background
                             let ch = segment.channel.clone();
-                            let ts = alert.timestamp;
                             tokio::spawn(async move {
-                                if let Err(e) = crate::web::alerts::send_trigger_email(&settings, &ch, ts) {
+                                if let Err(e) = crate::web::alerts::send_trigger_email(&settings, &ch, trigger_time) {
                                     warn!("Failed to send trigger email: {}", e);
                                 }
                             });
@@ -78,6 +82,10 @@ pub async fn run_pipeline(
                             if let Some(alert_id) = active_alerts.remove(&id) {
                                 info!("{}", alert);
                                 
+                                let max_int = alert_max_intensities.remove(&alert_id).unwrap_or(-2.0);
+                                let shindo_class = crate::intensity::get_shindo_class(max_int);
+                                let intensity_message = crate::web::alerts::format_shindo_message(&shindo_class);
+
                                 let (settings, trigger_time) = {
                                     let history = web_state.history.lock().unwrap();
                                     let trigger_time = history.get_events().iter().find(|e| e.id == alert_id).map(|e| e.trigger_time).unwrap_or(alert.timestamp);
@@ -88,31 +96,23 @@ pub async fn run_pipeline(
                                 let sta = segment.station.clone();
                                 let ts = alert.timestamp;
                                 let ratio = alert.ratio;
-                                
-                                // 3. Get sensitivity if available
-                                let sensitivity = if let Some(im) = &im {
-                                    im.config().sensitivities.first().cloned()
-                                } else {
-                                    None
-                                };
+                                let sens_opt = sensitivity_map.get(&ch).cloned();
 
-                                // 2. Generate snapshot
                                 let snapshot_window_seconds = 90.0;
                                 let snapshot_samples = (100.0 * snapshot_window_seconds) as usize;
 
-                                // Prepare trimmed data for all channels
                                 let mut trimmed_data: HashMap<String, Vec<f64>> = HashMap::new();
-                                for (chan, buf) in &waveform_buffers {
-                                    let start_idx = buf.len().saturating_sub(snapshot_samples);
-                                    let samples: Vec<f64> = buf.range(start_idx..).cloned().collect();
-                                    trimmed_data.insert(chan.clone(), samples);
+                                for (c, b) in &waveform_buffers {
+                                    let start_idx = b.len().saturating_sub(snapshot_samples);
+                                    let samples: Vec<f64> = b.range(start_idx..).cloned().collect();
+                                    trimmed_data.insert(c.clone(), samples);
                                 }
 
                                 let shared_state = web_state.clone();
+                                let email_msg = intensity_message.clone();
 
                                 tokio::spawn(async move {
-                                    // 1. Generate snapshot (all channels)
-                                    let snapshot_path = match crate::web::alerts::generate_snapshot(alert_id, &sta, &trimmed_data, trigger_time, sensitivity) {
+                                    let snapshot_path = match crate::web::alerts::generate_snapshot(alert_id, &sta, &trimmed_data, trigger_time, sens_opt, max_int) {
                                         Ok(path) => {
                                             let mut history = shared_state.history.lock().unwrap();
                                             history.set_snapshot_path(alert_id, path.clone());
@@ -124,17 +124,16 @@ pub async fn run_pipeline(
                                         }
                                     };
 
-                                    // 2. Send Reset Email
-                                    let snapshot_url = snapshot_path.as_ref().map(|p| format!("http://localhost:8080/images/alerts/{}", p));
-                                    if let Err(e) = crate::web::alerts::send_reset_email(&settings, &ch, trigger_time, ts, ratio, snapshot_url.as_deref()) {
+                                    if let Err(e) = crate::web::alerts::send_reset_email(&settings, &ch, trigger_time, ts, ratio, snapshot_path.as_ref().map(|p| format!("http://localhost:8080/images/alerts/{}", p)).as_deref(), &email_msg) {
                                         warn!("Failed to send reset email: {}", e);
                                     }
                                 });
 
-                                web_state.broadcast_alert_end(alert_id, segment.channel.clone(), alert.timestamp, alert.ratio).await;
-                                
-                                let mut history = web_state.history.lock().unwrap();
-                                history.reset_event(alert_id, alert.timestamp, alert.ratio);
+                                {
+                                    let mut history = web_state.history.lock().unwrap();
+                                    history.reset_event(alert_id, alert.timestamp, alert.ratio, intensity_message.clone());
+                                }
+                                web_state.broadcast_alert_end(alert_id, segment.channel.clone(), alert.timestamp, alert.ratio, intensity_message).await;
                             }
                         }
                     }
@@ -146,12 +145,10 @@ pub async fn run_pipeline(
 
             // 3. Seismic Intensity Calculation
             if let Some(im) = im.as_mut() {
-                // Check if this channel is one of the 3-component targets
                 let is_target = im.config().channels.iter().any(|target| id.contains(target));
                 
                 if is_target {
                     let mut map = HashMap::new();
-                    // Map to simple channel name (ENE, ENN, ENZ) for internal manager
                     let short_name = if id.contains("ENE") { "ENE" }
                                     else if id.contains("ENN") { "ENN" }
                                     else { "ENZ" };
@@ -161,7 +158,13 @@ pub async fn run_pipeline(
 
                     for res in im.get_results() {
                         info!("[{}] 計測震度: {:.2} ({})", res.timestamp, res.intensity, res.shindo_class);
-                        web_state.broadcast_intensity(res).await;
+                        web_state.broadcast_intensity(res.clone()).await;
+                        
+                        for &alert_id in active_alerts.values() {
+                            if let Some(peak) = alert_max_intensities.get_mut(&alert_id) {
+                                if res.intensity > *peak { *peak = res.intensity; }
+                            }
+                        }
                     }
                 }
             }

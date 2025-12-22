@@ -40,10 +40,17 @@ export default function HistoryPage() {
                       <h2 className="text-xl font-bold text-slate-900">{event.channel} Alert</h2>
                       <p className="text-sm text-slate-500">{new Date(event.trigger_time).toLocaleString()}</p>
                     </div>
-                    <span className="px-3 py-1 bg-rose-100 text-rose-600 rounded-full text-xs font-bold uppercase">
-                      Max Ratio: {event.max_ratio.toFixed(2)}
-                    </span>
+                    <div className="flex flex-col items-end gap-2">
+                      <span className="px-3 py-1 bg-rose-100 text-rose-600 rounded-full text-xs font-bold uppercase">
+                        Max Ratio: {event.max_ratio.toFixed(2)}
+                      </span>
+                    </div>
                   </div>
+                  {event.message && (
+                    <div className="p-3 bg-blue-50 border border-blue-100 rounded-xl">
+                      <p className="text-blue-700 font-bold">{event.message}</p>
+                    </div>
+                  )}
                   <div className="grid grid-cols-2 gap-4 text-sm">
                     <div className="bg-slate-50 p-3 rounded-xl">
                       <p className="text-slate-400 font-bold uppercase text-[10px]">Triggered</p>

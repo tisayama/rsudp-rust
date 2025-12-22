@@ -23,6 +23,10 @@ Auto-generated from all feature plans. Last updated: 2025-12-19
 - Local filesystem for PNGs, In-memory for 24h history (extendable to JSON/SQLite if persistence required) (010-comprehensive-alerting)
 - Rust 1.7x + `plotters` (Plotting), `rustfft` (Spectrogram), `colorous` (Colormaps, if needed) (011-rsudp-plot-compatibility)
 - Local filesystem (existing `alerts/` directory) (011-rsudp-plot-compatibility)
+- Rust 1.7x + `plotters` (with `ab_glyph`), `rustfft`, `chrono` (012-intensity-on-plot)
+- Embedded `NotoSansJP-Bold.ttf` (via `include_bytes!`) (012-intensity-on-plot)
+- Rust 1.7x (Backend) + `rsudp-rust` internal modules (trigger, pipeline, alerts) (013-alert-message-intensity)
+- In-memory (24h alert history) (013-alert-message-intensity)
 
 - Rust 1.7x (latest stable) + None (requires Rust toolchain: `rustc`, `cargo`) (001-init-rust-project)
 
@@ -42,9 +46,9 @@ cargo test [ONLY COMMANDS FOR ACTIVE TECHNOLOGIES][ONLY COMMANDS FOR ACTIVE TECH
 Rust 1.7x (latest stable): Follow standard conventions
 
 ## Recent Changes
+- 013-alert-message-intensity: Added Rust 1.7x (Backend) + `rsudp-rust` internal modules (trigger, pipeline, alerts)
+- 012-intensity-on-plot: Added Rust 1.7x + `plotters` (with `ab_glyph`), `rustfft`, `chrono`
 - 011-rsudp-plot-compatibility: Added Rust 1.7x + `plotters` (Plotting), `rustfft` (Spectrogram), `colorous` (Colormaps, if needed)
-- 010-comprehensive-alerting: Added Rust 1.7x (Backend), TypeScript / Next.js 14+ (Frontend) + `plotters` (Plotting), `lettre` (SMTP), `tower-http` (Static serving), `axum` (REST API), `tokio` (Async runtime)
-- 009-udp-mseed-streamer: Added Rust 1.7x + `tokio` (async), `clap` (CLI), `tracing` (logging), `byteorder` (binary parsing), `chrono` (time), `serde_json` (packet format)
 
 
 <!-- MANUAL ADDITIONS START -->

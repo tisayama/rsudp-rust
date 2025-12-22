@@ -27,6 +27,7 @@ export interface AlertEvent {
   reset_time: string | null;
   max_ratio: number;
   snapshot_path: string | null;
+  message: string | null;
 }
 
 export interface IntensityResult {
@@ -51,4 +52,4 @@ export type WsMessage =
   | { type: 'Alert', data: { timestamp: string, channel: string, message: string } }
   | { type: 'Intensity', data: IntensityResult }
   | { type: 'AlertStart', data: { id: string, channel: string, timestamp: string } }
-  | { type: 'AlertEnd', data: { id: string, channel: string, timestamp: string, max_ratio: number } };
+  | { type: 'AlertEnd', data: { id: string, channel: string, timestamp: string, max_ratio: number, message: string } };

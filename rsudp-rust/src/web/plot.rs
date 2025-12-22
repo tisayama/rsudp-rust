@@ -1,8 +1,9 @@
 use rustfft::{FftPlanner, num_complex::Complex};
 use plotters::prelude::*;
+use plotters::style::text_anchor::{Pos, HPos, VPos};
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
-use std::fs;
+use crate::intensity::get_shindo_class;
 
 pub struct Spectrogram {
     pub frequencies: Vec<f64>,
@@ -23,9 +24,6 @@ pub fn compute_spectrogram(samples: &[f64], sample_rate: f64, nfft: usize, nover
         .map(|i| 0.5 * (1.0 - (2.0 * std::f64::consts::PI * i as f64 / (nfft - 1) as f64).cos()))
         .collect();
 
-    // The time of a segment is typically the center or the end. 
-    // Matplotlib specgram centers it by default. 
-    // Here we align to the start of the window + half window size for center alignment.
     let time_offset = (nfft as f64 / 2.0) / sample_rate;
 
     for i in (0..samples.len().saturating_sub(nfft)).step_by(step) {
@@ -58,21 +56,53 @@ pub fn compute_spectrogram(samples: &[f64], sample_rate: f64, nfft: usize, nover
     Spectrogram { frequencies, times, data }
 }
 
+fn get_jma_color(shindo: &str) -> RGBColor {
+    match shindo {
+        "0" => RGBColor(242, 242, 255),
+        "1" => RGBColor(160, 238, 255),
+        "2" => RGBColor(0, 187, 255),
+        "3" => RGBColor(51, 255, 0),
+        "4" => RGBColor(255, 255, 0),
+        "5-" => RGBColor(255, 153, 0),
+        "5+" => RGBColor(255, 40, 0),
+        "6-" => RGBColor(165, 0, 33),
+        "6+" => RGBColor(85, 0, 17),
+        "7" => RGBColor(85, 0, 85),
+        _ => RGBColor(255, 255, 255),
+    }
+}
+
 pub fn draw_rsudp_plot(
     path: &str,
     station: &str,
     channel_data: &HashMap<String, Vec<f64>>,
     start_time: DateTime<Utc>,
     sample_rate: f64,
-    sensitivity: Option<f64>, // If provided, convert counts to physical units
+    sensitivity: Option<f64>,
+    max_intensity: f64, // Explicitly passed from pipeline
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Bake the font into the binary for static lifetime
-    const FONT_DATA: &[u8] = include_bytes!("/usr/share/fonts/truetype/dejavu/DejaVuSansCondensed.ttf");
-    let _ = plotters::style::register_font("sans-serif", FontStyle::Normal, FONT_DATA);
+    // Bake the fonts into the binary for static lifetime
+    const DEJAVU_FONT: &[u8] = include_bytes!("../resources/DejaVuSansCondensed.ttf");
+    const NOTO_FONT: &[u8] = include_bytes!("../resources/NotoSansJP-Bold.otf");
+    
+    let _ = plotters::style::register_font("sans-serif", FontStyle::Normal, DEJAVU_FONT);
+    let _ = plotters::style::register_font("noto-sans", FontStyle::Normal, NOTO_FONT);
 
     let n_channels = channel_data.len();
     let width = 1000;
     let height = 500 * n_channels as u32;
+
+    let shindo = get_shindo_class(max_intensity);
+    let shindo_color = get_jma_color(&shindo);
+
+    let display_shindo = match shindo.as_str() {
+        "5-" => "5弱",
+        "5+" => "5強",
+        "6-" => "6弱",
+        "6+" => "6強",
+        _ => &shindo,
+    };
+    let label = format!("[震度 {}相当]", display_shindo);
 
     // rsudp Dark Theme Colors
     let bg_color = RGBColor(32, 37, 48); // #202530
@@ -83,8 +113,8 @@ pub fn draw_rsudp_plot(
     let root = BitMapBackend::new(path, (width, height)).into_drawing_area();
     root.fill(&bg_color)?;
 
-    let label_style = TextStyle::from(("sans-serif", 12).into_font()).color(&fg_color);
-    let title_style = TextStyle::from(("sans-serif", 18).into_font()).color(&fg_color);
+    let label_font = FontDesc::new(FontFamily::Name("sans-serif"), 12.0, FontStyle::Normal).color(&fg_color);
+    let title_font = FontDesc::new(FontFamily::Name("sans-serif"), 18.0, FontStyle::Normal).color(&fg_color);
 
     let colormap_lut: Vec<RGBColor> = (0..256)
         .map(|i| {
@@ -99,8 +129,8 @@ pub fn draw_rsudp_plot(
     sorted_channels.sort_by(|a, b| {
         let order = |s: &str| {
             if s.ends_with('Z') { 0 }
-            else if s.ends_with('E') { 1 }
-            else if s.ends_with('N') { 2 }
+            else if s.ends_with('N') { 1 }
+            else if s.ends_with('E') { 2 }
             else { 3 }
         };
         order(a).cmp(&order(b)).then(a.cmp(b))
@@ -109,19 +139,15 @@ pub fn draw_rsudp_plot(
     for (i, &chan) in sorted_channels.iter().enumerate() {
         let raw_samples = &channel_data[chan];
         
-        // 1. Demean (remove DC offset)
         let mean_val = raw_samples.iter().sum::<f64>() / raw_samples.len() as f64;
         let mut samples: Vec<f64> = raw_samples.iter().map(|&s| s - mean_val).collect();
 
-        // 2. Apply Sensitivity (Physical Units)
-        let unit_label = if let Some(sens) = sensitivity {
-            if sens > 0.0 {
+        let unit_label = if let Some(sens_val) = sensitivity {
+            if sens_val > 0.0 {
                 for s in &mut samples {
-                    *s /= sens;
+                    *s /= sens_val;
                 }
-                // RS4D sensors are usually Velocity (m/s) or Acceleration (m/s^2)
-                // Assuming Velocity if sensitivity is high (~3-4e8), Accel if lower (~3e5)
-                if sens > 1_000_000.0 { "Velocity (m/s)" } else { "Accel (m/s²)" }
+                if sens_val > 1_000_000.0 { "Velocity (m/s)" } else { "Accel (m/s²)" }
             } else {
                 "Counts"
             }
@@ -135,18 +161,18 @@ pub fn draw_rsudp_plot(
 
         let pga = samples.iter().fold(0.0f64, |a, &b| a.max(b.abs()));
 
-        // Draw Waveform
+        // 1. Waveform
         let y_limit = if pga > 0.0 { pga * 1.1 } else { 1000.0 };
 
         let mut chart = ChartBuilder::on(&waveform_area)
             .caption(
                 format!("{} - {} | Peak: {:.2e} | Start: {}", station, chan, pga, start_time.format("%Y-%m-%d %H:%M:%S UTC")), 
-                title_style.clone()
+                title_font.clone()
             )
             .margin_left(20)
             .margin_right(20)
             .margin_top(10)
-            .set_label_area_size(LabelAreaPosition::Left, 70) // Increased for scientific notation
+            .set_label_area_size(LabelAreaPosition::Left, 70)
             .build_cartesian_2d(0.0..total_seconds, -y_limit..y_limit)?;
 
         chart
@@ -155,8 +181,8 @@ pub fn draw_rsudp_plot(
             .bold_line_style(grid_color)
             .axis_style(ShapeStyle::from(&fg_color).stroke_width(1))
             .y_desc(unit_label)
-            .axis_desc_style(label_style.clone())
-            .label_style(label_style.clone())
+            .axis_desc_style(label_font.clone())
+            .label_style(label_font.clone())
             .draw()?;
 
         chart.draw_series(LineSeries::new(
@@ -164,10 +190,9 @@ pub fn draw_rsudp_plot(
             line_color.stroke_width(1),
         ))?;
 
-        // Draw Spectrogram
+        // 2. Spectrogram
         let nfft = 128; 
         let overlap = (nfft as f64 * 0.9) as usize; 
-        // Note: compute_spectrogram already does local demeaning per window
         let spec = compute_spectrogram(&samples, sample_rate, nfft, overlap);
         
         if !spec.data.is_empty() {
@@ -192,8 +217,8 @@ pub fn draw_rsudp_plot(
                 .axis_style(ShapeStyle::from(&fg_color).stroke_width(1))
                 .x_desc("Seconds from start")
                 .y_desc("Freq [Hz]")
-                .axis_desc_style(label_style.clone())
-                .label_style(label_style.clone())
+                .axis_desc_style(label_font.clone())
+                .label_style(label_font.clone())
                 .draw()?;
 
             let x_step = if spec.times.len() > 1 { spec.times[1] - spec.times[0] } else { 1.0 };
@@ -202,14 +227,9 @@ pub fn draw_rsudp_plot(
             for (t_idx, t) in spec.times.iter().enumerate() {
                 for (f_idx, f) in spec.frequencies.iter().enumerate() {
                     let mag_sq = spec.data[t_idx][f_idx];
-                    
-                    // rsudp power law scaling
                     let intensity = (mag_sq / max_mag_sq).powf(0.1);
-                    
                     let lut_idx = (intensity * 255.0) as usize;
                     let plot_color = colormap_lut[lut_idx.min(255)];
-                    
-                    // Center the rectangle on the time point
                     let t_start = t - (x_step / 2.0);
                     let t_end = t + (x_step / 2.0);
 
@@ -221,6 +241,23 @@ pub fn draw_rsudp_plot(
             }
         }
     }
+
+    // 3. Draw Intensity Badge (Top-Right)
+    let badge_width = 400; // Increased for longer text
+    let badge_height = 100;
+    let badge_margin = 30;
+    let badge_rect = [
+        (width as i32 - badge_width - badge_margin, badge_margin), 
+        (width as i32 - badge_margin, badge_height + badge_margin)
+    ];
+    
+    root.draw(&Rectangle::new(badge_rect, shindo_color.filled()))?;
+    
+    let badge_font = FontDesc::new(FontFamily::Name("noto-sans"), 40.0, FontStyle::Normal).color(&WHITE);
+    let badge_text_style = TextStyle::from(badge_font)
+        .pos(Pos::new(HPos::Center, VPos::Center));
+    
+    root.draw(&Text::new(label, (width as i32 - badge_width / 2 - badge_margin, badge_margin + badge_height / 2), badge_text_style))?;
 
     root.present()?;
     Ok(())
