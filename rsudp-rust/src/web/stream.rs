@@ -9,6 +9,7 @@ use axum::{
 use chrono::{DateTime, Utc};
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, RwLock};
 use tokio::sync::broadcast;
 
@@ -16,6 +17,8 @@ use tokio::sync::broadcast;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlotSettings {
     pub scale: f64,
+    pub window_seconds: f64,
+    pub save_pct: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,6 +50,8 @@ pub struct WebState {
     pub tx: broadcast::Sender<WsMessage>,
     pub settings: Arc<RwLock<PlotSettings>>,
     pub history: SharedHistory,
+    pub waveform_buffers: Arc<Mutex<HashMap<String, VecDeque<f64>>>>,
+    pub alert_max_intensities: Arc<Mutex<HashMap<uuid::Uuid, f64>>>,
 }
 
 impl Default for WebState {
@@ -60,8 +65,14 @@ impl WebState {
         let (tx, _) = broadcast::channel(1024);
         Self {
             tx,
-            settings: Arc::new(RwLock::new(PlotSettings { scale: 1.0 })),
+            settings: Arc::new(RwLock::new(PlotSettings { 
+                scale: 1.0,
+                window_seconds: 90.0,
+                save_pct: 0.7,
+            })),
             history: Arc::new(Mutex::new(AlertHistoryManager::new())),
+            waveform_buffers: Arc::new(Mutex::new(HashMap::new())),
+            alert_max_intensities: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 

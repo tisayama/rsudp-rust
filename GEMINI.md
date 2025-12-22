@@ -27,6 +27,8 @@ Auto-generated from all feature plans. Last updated: 2025-12-19
 - Embedded `NotoSansJP-Bold.ttf` (via `include_bytes!`) (012-intensity-on-plot)
 - Rust 1.7x (Backend) + `rsudp-rust` internal modules (trigger, pipeline, alerts) (013-alert-message-intensity)
 - In-memory (24h alert history) (013-alert-message-intensity)
+- Rust 1.7x + `tokio` (Timers, Tasks), `uuid`, `chrono` (014-rsudp-alert-timing)
+- N/A (In-memory state) (014-rsudp-alert-timing)
 
 - Rust 1.7x (latest stable) + None (requires Rust toolchain: `rustc`, `cargo`) (001-init-rust-project)
 
@@ -46,9 +48,9 @@ cargo test [ONLY COMMANDS FOR ACTIVE TECHNOLOGIES][ONLY COMMANDS FOR ACTIVE TECH
 Rust 1.7x (latest stable): Follow standard conventions
 
 ## Recent Changes
+- 014-rsudp-alert-timing: Added Rust 1.7x + `tokio` (Timers, Tasks), `uuid`, `chrono`
+- 014-rsudp-alert-timing: Added [if applicable, e.g., PostgreSQL, CoreData, files or N/A]
 - 013-alert-message-intensity: Added Rust 1.7x (Backend) + `rsudp-rust` internal modules (trigger, pipeline, alerts)
-- 012-intensity-on-plot: Added Rust 1.7x + `plotters` (with `ab_glyph`), `rustfft`, `chrono`
-- 011-rsudp-plot-compatibility: Added Rust 1.7x + `plotters` (Plotting), `rustfft` (Spectrogram), `colorous` (Colormaps, if needed)
 
 
 <!-- MANUAL ADDITIONS START -->

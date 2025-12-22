@@ -10,6 +10,7 @@ export interface PlotSettings {
   window_seconds: number;
   auto_scale: boolean;
   theme: 'dark' | 'light';
+  save_pct: number;
 }
 
 export type AlertEventType = 'Alarm' | 'Reset';
@@ -45,6 +46,7 @@ export interface AlertSettings {
   smtp_user: string;
   smtp_pass: string;
   email_recipient: string;
+  save_pct: number;
 }
 
 export type WsMessage = 

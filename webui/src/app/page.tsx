@@ -13,9 +13,10 @@ import Link from 'next/link';
 
 const DEFAULT_SETTINGS: PlotSettings = {
   active_channels: ['SHZ', 'EHZ'],
-  window_seconds: 60,
+  window_seconds: 90,
   auto_scale: true,
   theme: 'light',
+  save_pct: 0.7,
 };
 
 export default function Home() {

@@ -7,6 +7,8 @@ use crate::intensity::{IntensityManager, IntensityConfig};
 use crate::web::stream::WebState;
 use crate::web::alerts::AlertEvent as WebAlertEvent;
 use uuid::Uuid;
+use std::time::Duration;
+use chrono::Utc;
 
 pub async fn run_pipeline(
     mut receiver: mpsc::Receiver<Vec<u8>>,
@@ -19,8 +21,6 @@ pub async fn run_pipeline(
     let mut tm = TriggerManager::new(trigger_config);
     let mut im = intensity_config.map(IntensityManager::new);
     let mut active_alerts: HashMap<String, Uuid> = HashMap::new();
-    let mut waveform_buffers: HashMap<String, VecDeque<f64>> = HashMap::new();
-    let mut alert_max_intensities: HashMap<Uuid, f64> = HashMap::new();
     let max_buffer_samples = (100.0 * 300.0) as usize; // 300 seconds at 100Hz
 
     while let Some(data) = receiver.recv().await {
@@ -33,13 +33,16 @@ pub async fn run_pipeline(
         };
 
         for segment in segments {
-            // 0. Update waveform buffers for alerts
-            let buf = waveform_buffers.entry(segment.channel.clone()).or_insert_with(|| VecDeque::with_capacity(max_buffer_samples));
-            for &sample in &segment.samples {
-                if buf.len() >= max_buffer_samples {
-                    buf.pop_front();
+            // 0. Update shared waveform buffers
+            {
+                let mut buffers = web_state.waveform_buffers.lock().unwrap();
+                let buf = buffers.entry(segment.channel.clone()).or_insert_with(|| VecDeque::with_capacity(max_buffer_samples));
+                for &sample in &segment.samples {
+                    if buf.len() >= max_buffer_samples {
+                        buf.pop_front();
+                    }
+                    buf.push_back(sample);
                 }
-                buf.push_back(sample);
             }
 
             // 1. STA/LTA Triggering
@@ -52,7 +55,11 @@ pub async fn run_pipeline(
                         AlertEventType::Trigger => {
                             let alert_id = Uuid::new_v4();
                             active_alerts.insert(id.clone(), alert_id);
-                            alert_max_intensities.insert(alert_id, -2.0);
+                            
+                            {
+                                let mut max_ints = web_state.alert_max_intensities.lock().unwrap();
+                                max_ints.insert(alert_id, -2.0);
+                            }
                             
                             info!("{}", alert);
                             web_state.broadcast_alert_start(alert_id, segment.channel.clone(), alert.timestamp).await;
@@ -71,69 +78,77 @@ pub async fn run_pipeline(
                                 (history.get_settings(), alert.timestamp)
                             };
                             
+                            // 1. Immediate Trigger Email
                             let ch = segment.channel.clone();
+                            let t_settings_trig = settings.clone();
                             tokio::spawn(async move {
-                                if let Err(e) = crate::web::alerts::send_trigger_email(&settings, &ch, trigger_time) {
+                                if let Err(e) = crate::web::alerts::send_trigger_email(&t_settings_trig, &ch, trigger_time) {
                                     warn!("Failed to send trigger email: {}", e);
                                 }
                             });
-                        },
-                        AlertEventType::Reset => {
-                            if let Some(alert_id) = active_alerts.remove(&id) {
-                                info!("{}", alert);
+
+                            // 2. Schedule Snapshot Generation & Summary Notification
+                            let plot_settings = web_state.settings.read().unwrap().clone();
+                            let delay = Duration::from_secs_f64(plot_settings.window_seconds * plot_settings.save_pct);
+                            let shared_state = web_state.clone();
+                            let alert_ch = segment.channel.clone();
+                            let alert_sta = segment.station.clone();
+                            let s_map = sensitivity_map.clone();
+                            let t_settings_reset = settings.clone();
+
+                            tokio::spawn(async move {
+                                tokio::time::sleep(delay).await;
                                 
-                                let max_int = alert_max_intensities.remove(&alert_id).unwrap_or(-2.0);
+                                let max_int = {
+                                    let mut max_ints = shared_state.alert_max_intensities.lock().unwrap();
+                                    max_ints.remove(&alert_id).unwrap_or(-2.0)
+                                };
+                                
                                 let shindo_class = crate::intensity::get_shindo_class(max_int);
                                 let intensity_message = crate::web::alerts::format_shindo_message(&shindo_class);
+                                let sens_opt = s_map.get(&alert_ch).cloned();
 
-                                let (settings, trigger_time) = {
-                                    let history = web_state.history.lock().unwrap();
-                                    let trigger_time = history.get_events().iter().find(|e| e.id == alert_id).map(|e| e.trigger_time).unwrap_or(alert.timestamp);
-                                    (history.get_settings(), trigger_time)
+                                let snapshot_samples = (100.0 * plot_settings.window_seconds) as usize;
+                                let mut trimmed_data: HashMap<String, Vec<f64>> = HashMap::new();
+                                
+                                {
+                                    let buffers = shared_state.waveform_buffers.lock().unwrap();
+                                    for (c, b) in buffers.iter() {
+                                        let start_idx = b.len().saturating_sub(snapshot_samples);
+                                        let samples: Vec<f64> = b.range(start_idx..).cloned().collect();
+                                        trimmed_data.insert(c.clone(), samples);
+                                    }
+                                }
+
+                                // Generate snapshot
+                                let snapshot_path = match crate::web::alerts::generate_snapshot(alert_id, &alert_sta, &trimmed_data, trigger_time, sens_opt, max_int) {
+                                    Ok(path) => {
+                                        let mut history = shared_state.history.lock().unwrap();
+                                        history.set_snapshot_path(alert_id, path.clone());
+                                        Some(path)
+                                    },
+                                    Err(e) => {
+                                        warn!("Failed to generate snapshot: {}", e);
+                                        None
+                                    }
                                 };
 
-                                let ch = segment.channel.clone();
-                                let sta = segment.station.clone();
-                                let ts = alert.timestamp;
-                                let ratio = alert.ratio;
-                                let sens_opt = sensitivity_map.get(&ch).cloned();
-
-                                let snapshot_window_seconds = 90.0;
-                                let snapshot_samples = (100.0 * snapshot_window_seconds) as usize;
-
-                                let mut trimmed_data: HashMap<String, Vec<f64>> = HashMap::new();
-                                for (c, b) in &waveform_buffers {
-                                    let start_idx = b.len().saturating_sub(snapshot_samples);
-                                    let samples: Vec<f64> = b.range(start_idx..).cloned().collect();
-                                    trimmed_data.insert(c.clone(), samples);
+                                // Send Reset (Summary) Email
+                                if let Err(e) = crate::web::alerts::send_reset_email(&t_settings_reset, &alert_ch, trigger_time, Utc::now(), max_int, snapshot_path.as_ref().map(|p| format!("http://localhost:8080/images/alerts/{}", p)).as_deref(), &intensity_message) {
+                                    warn!("Failed to send reset email: {}", e);
                                 }
 
-                                let shared_state = web_state.clone();
-                                let email_msg = intensity_message.clone();
-
-                                tokio::spawn(async move {
-                                    let snapshot_path = match crate::web::alerts::generate_snapshot(alert_id, &sta, &trimmed_data, trigger_time, sens_opt, max_int) {
-                                        Ok(path) => {
-                                            let mut history = shared_state.history.lock().unwrap();
-                                            history.set_snapshot_path(alert_id, path.clone());
-                                            Some(path)
-                                        },
-                                        Err(e) => {
-                                            warn!("Failed to generate snapshot: {}", e);
-                                            None
-                                        }
-                                    };
-
-                                    if let Err(e) = crate::web::alerts::send_reset_email(&settings, &ch, trigger_time, ts, ratio, snapshot_path.as_ref().map(|p| format!("http://localhost:8080/images/alerts/{}", p)).as_deref(), &email_msg) {
-                                        warn!("Failed to send reset email: {}", e);
-                                    }
-                                });
-
+                                // Update history and broadcast
                                 {
-                                    let mut history = web_state.history.lock().unwrap();
-                                    history.reset_event(alert_id, alert.timestamp, alert.ratio, intensity_message.clone());
+                                    let mut history = shared_state.history.lock().unwrap();
+                                    history.reset_event(alert_id, Utc::now(), max_int, intensity_message.clone());
                                 }
-                                web_state.broadcast_alert_end(alert_id, segment.channel.clone(), alert.timestamp, alert.ratio, intensity_message).await;
+                                shared_state.broadcast_alert_end(alert_id, alert_ch, Utc::now(), max_int, intensity_message).await;
+                            });
+                        },
+                        AlertEventType::Reset => {
+                            if active_alerts.remove(&id).is_some() {
+                                info!("Alert state reset for {}", id);
                             }
                         }
                     }
@@ -160,9 +175,12 @@ pub async fn run_pipeline(
                         info!("[{}] 計測震度: {:.2} ({})", res.timestamp, res.intensity, res.shindo_class);
                         web_state.broadcast_intensity(res.clone()).await;
                         
-                        for &alert_id in active_alerts.values() {
-                            if let Some(peak) = alert_max_intensities.get_mut(&alert_id) {
-                                if res.intensity > *peak { *peak = res.intensity; }
+                        {
+                            let mut max_ints = web_state.alert_max_intensities.lock().unwrap();
+                            for &alert_id in active_alerts.values() {
+                                if let Some(peak) = max_ints.get_mut(&alert_id) {
+                                    if res.intensity > *peak { *peak = res.intensity; }
+                                }
                             }
                         }
                     }

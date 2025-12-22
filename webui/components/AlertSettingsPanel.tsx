@@ -55,6 +55,22 @@ const AlertSettingsPanel: React.FC = () => {
             <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${settings.email_enabled ? 'translate-x-6' : 'translate-x-1'}`} />
           </button>
         </div>
+
+        <div className="pt-4 border-t border-slate-100">
+          <label className="block text-sm font-semibold text-gray-700 mb-2">
+            Snapshot Save Pct: {(settings.save_pct * 100).toFixed(0)}%
+          </label>
+          <input
+            type="range"
+            min="0.1"
+            max="0.9"
+            step="0.05"
+            value={settings.save_pct}
+            onChange={(e) => setSettings({ ...settings, save_pct: parseFloat(e.target.value) })}
+            className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+          />
+          <p className="text-[10px] text-slate-400 mt-1">Wait for this % of window duration after trigger before saving image.</p>
+        </div>
       </div>
 
       {settings.email_enabled && (

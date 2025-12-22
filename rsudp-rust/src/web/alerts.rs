@@ -25,6 +25,7 @@ pub struct AlertSettings {
     pub smtp_user: String,
     pub smtp_pass: String,
     pub email_recipient: String,
+    pub save_pct: f64,
 }
 
 impl Default for AlertSettings {
@@ -38,6 +39,7 @@ impl Default for AlertSettings {
             smtp_user: "".to_string(),
             smtp_pass: "".to_string(),
             email_recipient: "".to_string(),
+            save_pct: 0.7,
         }
     }
 }

@@ -35,6 +35,14 @@ struct Args {
     /// UDP port for receiver
     #[arg(short, long, default_value_t = 12345)]
     udp_port: u16,
+
+    /// Seconds of data to display in plot
+    #[arg(long, default_value_t = 90.0)]
+    window_seconds: f64,
+
+    /// Ratio of duration to wait before posting (0.0 to 1.0)
+    #[arg(long, default_value_t = 0.7)]
+    save_pct: f64,
 }
 
 #[tokio::main]
@@ -43,6 +51,20 @@ async fn main() {
     let args = Args::parse();
 
     let web_state = WebState::new();
+    {
+        let mut settings = web_state.settings.write().unwrap();
+        settings.window_seconds = args.window_seconds;
+        settings.save_pct = args.save_pct;
+    }
+    
+    // Update default history settings as well
+    {
+        let mut history = web_state.history.lock().unwrap();
+        let mut h_settings = history.get_settings();
+        h_settings.save_pct = args.save_pct;
+        history.update_settings(h_settings);
+    }
+
     let (pipe_tx, pipe_rx) = mpsc::channel(100);
 
     // 1. Start Web Server
