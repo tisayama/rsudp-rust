@@ -1,6 +1,7 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Utc, Duration};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use tracing::info;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AlertEventType {
@@ -74,6 +75,14 @@ impl BandpassFilter {
         Self { sections: vec![s1, s2], initialized: false }
     }
 
+    fn reset(&mut self) {
+        self.initialized = false;
+        for s in &mut self.sections {
+            s.x1 = 0.0; s.x2 = 0.0;
+            s.y1 = 0.0; s.y2 = 0.0;
+        }
+    }
+
     fn process(&mut self, sample: f64) -> f64 {
         // Simple initialization to avoid large step response from 0 to first sample
         if !self.initialized {
@@ -106,6 +115,7 @@ struct StaLtaState {
     triggered: bool,
     max_ratio: f64,
     filter: BandpassFilter,
+    last_timestamp: Option<DateTime<Utc>>,
 }
 
 impl TriggerManager {
@@ -135,7 +145,24 @@ impl TriggerManager {
             triggered: false,
             max_ratio: 0.0,
             filter: BandpassFilter::new_100hz_01_20(),
+            last_timestamp: None,
         });
+
+        // Detect jump
+        if let Some(last_ts) = state.last_timestamp {
+            let expected = last_ts + Duration::milliseconds(10); // Assume 100Hz
+            let diff = (timestamp - expected).num_milliseconds().abs();
+            if diff > 1000 {
+                info!("Temporal jump detected on channel {} ({:?} -> {:?}). Resetting STA/LTA.", id, last_ts, timestamp);
+                state.sta = 0.0;
+                state.lta = 0.0;
+                state.sample_count = 0;
+                state.triggered = false;
+                state.max_ratio = 0.0;
+                state.filter.reset();
+            }
+        }
+        state.last_timestamp = Some(timestamp);
 
         // 1. Convert to Physical Units (Deconvolution)
         // If sensitivity is 0 or invalid, use raw counts to avoid div/0
