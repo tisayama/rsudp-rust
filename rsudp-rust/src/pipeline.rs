@@ -46,8 +46,9 @@ pub async fn run_pipeline(
             let id = format!("{}.{}.{}.{}", segment.network, segment.station, segment.location, segment.channel);
             let sensitivity = sensitivity_map.get(&segment.channel).cloned().unwrap_or(384500.0);
             
-            for &sample in &segment.samples {
-                if let Some(alert) = tm.add_sample(&id, sample, segment.starttime, sensitivity) {
+            for (i, &sample) in segment.samples.iter().enumerate() {
+                let sample_ts = segment.starttime + chrono::Duration::nanoseconds((i as f64 * 1_000_000_000.0 / segment.sampling_rate) as i64);
+                if let Some(alert) = tm.add_sample(&id, sample, sample_ts, sensitivity) {
                     match alert.event_type {
                         AlertEventType::Trigger => {
                             let alert_id = Uuid::new_v4();
