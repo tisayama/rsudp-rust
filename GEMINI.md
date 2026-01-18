@@ -33,6 +33,7 @@ Auto-generated from all feature plans. Last updated: 2025-12-19
 - Rust 1.7x (Edition 2024) + `serde` (serialization), `toml` (TOML parsing), `serde_yaml` (YAML parsing), `config` (configuration management), `clap` (CLI args) (016-add-rsudp-config)
 - N/A (Configuration files on disk) (016-add-rsudp-config)
 - Rust 1.7x (Edition 2024) + `serde_json` (will be replaced/bypassed for custom formatting), `chrono` (timestamps) (017-fix-streamer-compatibility)
+- Rust 1.7x (Edition 2024) + `tokio` (async/sleep), `chrono` (timestamps), `clap` (CLI args) (018-fix-packet-granularity)
 
 - Rust 1.7x (latest stable) + None (requires Rust toolchain: `rustc`, `cargo`) (001-init-rust-project)
 
@@ -52,8 +53,8 @@ cargo test [ONLY COMMANDS FOR ACTIVE TECHNOLOGIES][ONLY COMMANDS FOR ACTIVE TECH
 Rust 1.7x (latest stable): Follow standard conventions
 
 ## Recent Changes
+- 018-fix-packet-granularity: Added Rust 1.7x (Edition 2024) + `tokio` (async/sleep), `chrono` (timestamps), `clap` (CLI args)
 - 017-fix-streamer-compatibility: Added Rust 1.7x (Edition 2024) + `serde_json` (will be replaced/bypassed for custom formatting), `chrono` (timestamps)
-- 016-add-rsudp-config: Added Rust 1.7x (Edition 2024) + `serde` (serialization), `toml` (TOML parsing), `serde_yaml` (YAML parsing), `config` (configuration management), `clap` (CLI args)
 - 016-add-rsudp-config: Added Rust 1.7x (Edition 2024) + `serde` (serialization), `toml` (TOML parsing), `serde_yaml` (YAML parsing), `config` (configuration management), `clap` (CLI args)
 
 

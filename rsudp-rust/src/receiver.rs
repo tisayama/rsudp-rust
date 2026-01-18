@@ -2,7 +2,7 @@ use std::net::SocketAddr;
 use std::time::Instant;
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
-use tracing::{info, warn};
+use tracing::{info, warn, debug};
 
 #[derive(Debug, Clone)]
 pub struct Packet {
@@ -26,7 +26,7 @@ pub async fn start_receiver(port: u16, tx: mpsc::Sender<Packet>) -> std::io::Res
                 let data = buf[..len].to_vec();
                 let received_at = Instant::now();
 
-                info!("Received {} bytes from {}", len, source);
+                debug!("Received {} bytes from {}", len, source);
 
                 let packet = Packet {
                     source,

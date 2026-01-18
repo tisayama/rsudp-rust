@@ -28,6 +28,10 @@ struct Args {
     /// Whether to restart from the beginning when the end is reached
     #[arg(short, long, default_value_t = false)]
     r#loop: bool,
+
+    /// Number of samples per UDP packet (default: 25 to match rsudp standard)
+    #[arg(long, default_value_t = 25)]
+    samples_per_packet: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -85,6 +89,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("Target: {}", args.addr);
     tracing::info!("Speed: {}x", args.speed);
     tracing::info!("Loop mode: {}", args.r#loop);
+    tracing::info!("Samples per packet: {}", args.samples_per_packet);
 
     tracing::info!("Indexing file...");
     let index = index_mseed_file(&args.file)?;
@@ -110,38 +115,49 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             (index.last().unwrap().start_time - session_start_data).to_std()?;
 
         for (i, entry) in index.iter().enumerate() {
-            let data_elapsed = (entry.start_time - session_start_data).to_std()?;
-            let real_wait = data_elapsed.div_f64(args.speed);
-
-            let target_time = session_start_real + real_wait;
-            let now = Instant::now();
-
-            if target_time > now {
-                select! {
-                    _ = sleep(target_time - now) => {},
-                    _ = &mut stop => {
-                        tracing::info!("Shutdown signal received");
-                        break 'outer;
-                    }
-                }
-            }
-
             file.seek(SeekFrom::Start(entry.file_offset))?;
             file.read_exact(&mut buffer)?;
 
             match parse_single_record(&buffer) {
                 Ok(segment) => {
-                    let ts_f64 = segment.starttime.timestamp() as f64
-                        + (segment.starttime.timestamp_subsec_nanos() as f64 / 1_000_000_000.0);
+                    // Chunk the samples
+                    let chunks: Vec<&[f64]> = segment.samples.chunks(args.samples_per_packet).collect();
+                    let num_chunks = chunks.len();
                     
-                    // Replaced JSON serialization with rsudp-compatible custom format
-                    // OLD: let mut packet_data = vec![json!(segment.channel), json!(ts_f64)]; ...
-                    
-                    let packet_string = format_packet(&segment.channel, ts_f64, &segment.samples);
-                    
-                    socket.send_to(packet_string.as_bytes(), args.addr)?;
+                    for (chunk_idx, chunk) in chunks.iter().enumerate() {
+                        // Calculate precise timestamp for this chunk within the record
+                        let offset_seconds = (chunk_idx * args.samples_per_packet) as f64 / segment.sampling_rate;
+                        
+                        // Determine absolute target play time for this chunk
+                        let record_relative_start = (entry.start_time - session_start_data).to_std()?;
+                        let chunk_relative_start = Duration::from_secs_f64(offset_seconds);
+                        let total_relative_start = record_relative_start + chunk_relative_start;
+                        
+                        let real_wait = total_relative_start.div_f64(args.speed);
+                        let target_time = session_start_real + real_wait;
+                        let now = Instant::now();
+
+                        if target_time > now {
+                            select! {
+                                _ = sleep(target_time - now) => {},
+                                _ = &mut stop => {
+                                    tracing::info!("Shutdown signal received");
+                                    break 'outer;
+                                }
+                            }
+                        }
+
+                        // Calculate timestamp for the packet payload
+                        let chunk_start_time = segment.starttime + chrono::Duration::nanoseconds((offset_seconds * 1_000_000_000.0) as i64);
+                        let ts_f64 = chunk_start_time.timestamp() as f64
+                            + (chunk_start_time.timestamp_subsec_nanos() as f64 / 1_000_000_000.0);
+                        
+                        let packet_string = format_packet(&segment.channel, ts_f64, chunk);
+                        socket.send_to(packet_string.as_bytes(), args.addr)?;
+                    }
 
                     if i % 100 == 0 || i == total_records - 1 {
+                        let data_elapsed = (entry.start_time - session_start_data).to_std().unwrap_or(Duration::ZERO);
                         let percent = (i as f64 / total_records as f64) * 100.0;
                         let eta = if args.speed > 0.0 {
                             let remaining_data = total_data_duration
@@ -152,10 +168,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             "N/A".to_string()
                         };
                         tracing::info!(
-                            "[{:.1}%] Sent record {}/{}. ETA: {}",
+                            "[{:.1}%] Sent record {}/{} ({} chunks). ETA: {}",
                             percent,
                             i + 1,
                             total_records,
+                            num_chunks,
                             eta
                         );
                     }
