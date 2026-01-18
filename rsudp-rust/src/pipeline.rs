@@ -144,8 +144,11 @@ pub async fn run_pipeline(
                                 info!("Snapshot Execution: Actual Start Time passed to plot: {}", actual_start_time);
 
                                 // Generate snapshot
-                                let snapshot_path = match crate::web::alerts::generate_snapshot(alert_id, &alert_sta, &trimmed_data, actual_start_time, sens_opt, max_int) {
+                                info!("Generating snapshot for alert {}...", alert_id);
+                                let out_dir = plot_settings.output_dir.clone();
+                                let snapshot_path = match crate::web::alerts::generate_snapshot(alert_id, &alert_sta, &trimmed_data, actual_start_time, sens_opt, max_int, &out_dir) {
                                     Ok(path) => {
+                                        info!("Snapshot saved successfully to {}", path);
                                         let mut history = shared_state.history.lock().unwrap();
                                         history.set_snapshot_path(alert_id, path.clone());
                                         Some(path)

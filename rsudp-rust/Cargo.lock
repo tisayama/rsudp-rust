@@ -1730,6 +1730,7 @@ dependencies = [
  "num-complex",
  "plotters",
  "quick-xml",
+ "regex",
  "rustfft",
  "serde",
  "serde_json",

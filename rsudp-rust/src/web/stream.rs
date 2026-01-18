@@ -14,11 +14,14 @@ use std::sync::{Arc, Mutex, RwLock};
 use tokio::sync::broadcast;
 use tracing::{warn, debug};
 
+use std::path::PathBuf;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlotSettings {
     pub scale: f64,
     pub window_seconds: f64,
     pub save_pct: f64,
+    pub output_dir: PathBuf,
 }
 
 #[derive(Debug, Clone)]
@@ -143,6 +146,7 @@ impl WebState {
                 scale: 1.0,
                 window_seconds: 90.0,
                 save_pct: 0.7,
+                output_dir: PathBuf::from("."),
             })),
             history: Arc::new(Mutex::new(AlertHistoryManager::new())),
             waveform_buffers: Arc::new(Mutex::new(HashMap::new())),

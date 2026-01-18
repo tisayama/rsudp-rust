@@ -49,6 +49,10 @@ struct Args {
     /// Seconds of data to display in plot (overrides config)
     #[arg(long)]
     window_seconds: Option<f64>,
+    
+    /// Directory to save plots and data (overrides config)
+    #[arg(short, long)]
+    output_dir: Option<PathBuf>,
 
     /// Ratio of duration to wait before posting (overrides config)
     #[arg(long)]
@@ -92,13 +96,22 @@ async fn main() {
     // 3. Override Settings with CLI Args
     if let Some(p) = args.udp_port { settings.settings.port = p; }
     if let Some(s) = args.station { settings.settings.station = s; }
+    if let Some(o) = args.output_dir { settings.settings.output_dir = o; }
     // Note: window_seconds and save_pct are merged below into web_state and config
 
+    // 4. Initialize WebState with merged settings
     let web_state = WebState::new();
     {
-        let mut ws_settings = web_state.settings.write().unwrap();
-        ws_settings.window_seconds = args.window_seconds.unwrap_or(settings.plot.duration as f64);
-        ws_settings.save_pct = args.save_pct.unwrap_or(0.7); // Fallback to 0.7 if not in settings or CLI
+        let mut plot_settings = web_state.settings.write().unwrap();
+        // Use plot.duration from config as default for window_seconds
+        plot_settings.window_seconds = args.window_seconds.unwrap_or(settings.plot.duration as f64);
+        
+        // Use a default save_pct since it's not in the main config yet, or use arg
+        if let Some(sp) = args.save_pct {
+            plot_settings.save_pct = sp;
+        }
+        
+        plot_settings.output_dir = settings.settings.output_dir.clone();
     }
     
     // Update default history settings as well

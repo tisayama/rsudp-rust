@@ -136,62 +136,29 @@ use std::collections::HashMap;
 
 
 
+use std::path::Path;
+
 pub fn generate_snapshot(
-
-
-
     id: Uuid,
-
-
-
     station: &str,
-
-
-
     channel_data: &HashMap<String, Vec<f64>>,
-
-
-
     start_time: DateTime<Utc>,
-
-
-
     sensitivity: Option<f64>,
-
-
-
     max_intensity: f64,
-
-
-
+    output_dir: &Path,
 ) -> Result<String, Box<dyn std::error::Error>> {
+    let filename = format!("{}.png", id);
+    let alerts_dir = output_dir.join("alerts");
+    
+    if !alerts_dir.exists() {
+        std::fs::create_dir_all(&alerts_dir)?;
+    }
+    
+    let path = alerts_dir.join(&filename);
 
-
-
-    let filename = format!("{}.png", id); // No channel in filename if it's a composite
-
-
-
-    let path = format!("alerts/{}", filename);
-
-
-
-
-
-
-
-    draw_rsudp_plot(&path, station, channel_data, start_time, 100.0, sensitivity, max_intensity)?;
-
-
-
-
-
-
+    draw_rsudp_plot(path.to_str().unwrap(), station, channel_data, start_time, 100.0, sensitivity, max_intensity)?;
 
     Ok(filename)
-
-
-
 }
 
 
