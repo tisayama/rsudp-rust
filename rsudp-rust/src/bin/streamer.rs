@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use clap::Parser;
 use rsudp_rust::parser::header::parse_header;
 use rsudp_rust::parser::mseed::parse_single_record;
-use serde_json::json;
+// use serde_json::json; // Removed: using custom formatting for rsudp compatibility
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::net::{SocketAddr, UdpSocket};
@@ -54,6 +54,25 @@ fn index_mseed_file(path: &PathBuf) -> Result<Vec<RecordIndexEntry>, Box<dyn std
 
     index.sort_by_key(|e| e.start_time);
     Ok(index)
+}
+
+/// Formats a packet string compatible with rsudp's parsing logic.
+/// Expected format: {'CHANNEL', TIMESTAMP, SAMPLE1, SAMPLE2, ...}
+/// rsudp parsing: DP.decode('utf-8').replace('}','').split(',')[2:]
+fn format_packet(channel: &str, timestamp: f64, samples: &[f64]) -> String {
+    let mut s = String::with_capacity(128 + samples.len() * 8);
+    s.push_str("{'");
+    s.push_str(channel);
+    s.push_str("', ");
+    s.push_str(&timestamp.to_string());
+    
+    for sample in samples {
+        s.push_str(", ");
+        s.push_str(&sample.to_string());
+    }
+    
+    s.push('}');
+    s
 }
 
 #[tokio::main]
@@ -114,13 +133,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Ok(segment) => {
                     let ts_f64 = segment.starttime.timestamp() as f64
                         + (segment.starttime.timestamp_subsec_nanos() as f64 / 1_000_000_000.0);
-                    let mut packet_data = vec![json!(segment.channel), json!(ts_f64)];
-                    for &sample in &segment.samples {
-                        packet_data.push(json!(sample as i32));
-                    }
-
-                    let json_packet = serde_json::to_string(&packet_data)?;
-                    socket.send_to(json_packet.as_bytes(), args.addr)?;
+                    
+                    // Replaced JSON serialization with rsudp-compatible custom format
+                    // OLD: let mut packet_data = vec![json!(segment.channel), json!(ts_f64)]; ...
+                    
+                    let packet_string = format_packet(&segment.channel, ts_f64, &segment.samples);
+                    
+                    socket.send_to(packet_string.as_bytes(), args.addr)?;
 
                     if i % 100 == 0 || i == total_records - 1 {
                         let percent = (i as f64 / total_records as f64) * 100.0;
@@ -159,4 +178,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tracing::info!("Streamer finished");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_format_packet_exact_match() {
+        let channel = "EHZ";
+        let timestamp = 1234567890.123;
+        let samples = vec![100.0, 102.5, 99.0, -50.0];
+        
+        let expected = "{'EHZ', 1234567890.123, 100, 102.5, 99, -50}";
+        let actual = format_packet(channel, timestamp, &samples);
+        
+        assert_eq!(actual, expected);
+    }
 }

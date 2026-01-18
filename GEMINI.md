@@ -32,6 +32,7 @@ Auto-generated from all feature plans. Last updated: 2025-12-19
 - Rust 1.7x + `plotters`, `chrono` (015-fix-plot-timestamp)
 - Rust 1.7x (Edition 2024) + `serde` (serialization), `toml` (TOML parsing), `serde_yaml` (YAML parsing), `config` (configuration management), `clap` (CLI args) (016-add-rsudp-config)
 - N/A (Configuration files on disk) (016-add-rsudp-config)
+- Rust 1.7x (Edition 2024) + `serde_json` (will be replaced/bypassed for custom formatting), `chrono` (timestamps) (017-fix-streamer-compatibility)
 
 - Rust 1.7x (latest stable) + None (requires Rust toolchain: `rustc`, `cargo`) (001-init-rust-project)
 
@@ -51,9 +52,9 @@ cargo test [ONLY COMMANDS FOR ACTIVE TECHNOLOGIES][ONLY COMMANDS FOR ACTIVE TECH
 Rust 1.7x (latest stable): Follow standard conventions
 
 ## Recent Changes
+- 017-fix-streamer-compatibility: Added Rust 1.7x (Edition 2024) + `serde_json` (will be replaced/bypassed for custom formatting), `chrono` (timestamps)
 - 016-add-rsudp-config: Added Rust 1.7x (Edition 2024) + `serde` (serialization), `toml` (TOML parsing), `serde_yaml` (YAML parsing), `config` (configuration management), `clap` (CLI args)
 - 016-add-rsudp-config: Added Rust 1.7x (Edition 2024) + `serde` (serialization), `toml` (TOML parsing), `serde_yaml` (YAML parsing), `config` (configuration management), `clap` (CLI args)
-- 015-fix-plot-timestamp: Added Rust 1.7x + `plotters`, `chrono`
 
 
 <!-- MANUAL ADDITIONS START -->
