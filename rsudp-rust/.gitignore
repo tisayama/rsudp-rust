@@ -7,6 +7,8 @@ target/
 *.log
 *.bk
 *.csv
+*.pid
+alerts/*.png
 
 # Editors
 .idea/
