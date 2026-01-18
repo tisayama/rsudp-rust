@@ -1,11 +1,12 @@
 <!--
 SYNC IMPACT REPORT
-- Version: 1.0.0 → 1.1.0 (MINOR bump)
-- Change: Added standard technology stack requirements for WebUI.
+- Version: 1.1.0 → 1.2.0 (MINOR bump)
+- Change: Added principles for self-verification before commit and master branch protection.
 - Principles Added:
-  - VI. 標準技術スタック (Standard Tech Stack)
+  - VII. 自己検証の義務 (Mandatory Self-Verification)
+  - VIII. ブランチ運用とトレーサビリティ (Branch Strategy and Traceability)
 - Templates Checked:
-  - .specify/templates/plan-template.md (✅ No changes needed, logic already covers constitution checks)
+  - .specify/templates/plan-template.md (✅ No changes needed)
   - .specify/templates/spec-template.md (✅ No changes needed)
   - .specify/templates/tasks-template.md (✅ No changes needed)
 -->
@@ -31,6 +32,12 @@ PythonアプリケーションのRustによる書き直しとして、大幅な�
 ### VI. 標準技術スタック (Standard Tech Stack)
 WebUIを実装する場合、通信にはREST APIおよびWebSockets（サーバサイド: Rust）を使用し、フロントエンドはNext.jsおよびTailwind CSSを使用しなければなりません。これにより、開発の一貫性と保守性を確保します。
 
+### VII. 自己検証の義務 (Mandatory Self-Verification)
+コミットを行う前に、必ず自分自身でコードの動作確認（ビルド、テスト、実行確認）を行わなければなりません。未検証のコードをリポジトリに反映することは禁止されます。
+
+### VIII. ブランチ運用とトレーサビリティ (Branch Strategy and Traceability)
+変更の履歴を明確に追跡可能にするため、`master`（または`main`）ブランチへの直接コミットは禁止されます。すべての変更は、必ず作業用のフィーチャーブランチ（feature branch）またはトピックブランチを作成して行い、最終的にプルリクエストまたはマージを通じて`master`に統合されなければなりません。
+
 ## 開発ワークフロー (Development Workflow)
 
 本プロジェクトでは、仕様駆動開発（Specification-Driven Development）を採用します。新しい機能の実装や既存機能の変更は、必ず事前に仕様書を作成し、関係者の合意を得てから着手します。
@@ -46,4 +53,4 @@ WebUIを実装する場合、通信にはREST APIおよびWebSockets（サーバ
 
 この憲法は、他のすべての慣行や規約に優先します。憲法の改正には、変更内容の文書化、主要な貢献者による承認、そして必要に応じた既存コードベースへの移行計画が必要です。すべてのプルリクエストとコードレビューは、この憲法の原則に準拠しているか検証する必要があります。
 
-**バージョン**: 1.1.0 | **制定日**: 2025-12-18 | **最終改正日**: 2025-12-19
+**バージョン**: 1.2.0 | **制定日**: 2025-12-18 | **最終改正日**: 2026-01-18
