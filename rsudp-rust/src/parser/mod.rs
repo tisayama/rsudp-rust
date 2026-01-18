@@ -17,6 +17,49 @@ pub struct TraceSegment {
 }
 
 pub fn parse_any(data: &[u8]) -> Result<Vec<TraceSegment>, Box<dyn std::error::Error>> {
+    let s = String::from_utf8_lossy(data);
+    let s_trimmed = s.trim();
+
+    // Try Python-style string format: {'CHANNEL', TIMESTAMP, S1, S2, ...}
+    if s_trimmed.starts_with("{") && s_trimmed.ends_with("}") {
+        let content = &s_trimmed[1..s_trimmed.len()-1]; // Remove { and }
+        let parts: Vec<&str> = content.split(',').collect();
+        
+        if parts.len() >= 3 {
+            // Part 0: Channel (e.g. 'EHZ')
+            let channel = parts[0].trim().trim_matches('\'').to_string();
+            
+            // Part 1: Timestamp
+            let timestamp: f64 = parts[1].trim().parse().unwrap_or(0.0);
+            let starttime = Utc
+                .timestamp_opt(
+                    timestamp as i64,
+                    ((timestamp % 1.0) * 1_000_000_000.0) as u32,
+                )
+                .unwrap();
+
+            // Part 2+: Samples
+            let mut samples = Vec::new();
+            for part in parts.iter().skip(2) {
+                if let Ok(val) = part.trim().parse::<f64>() {
+                    samples.push(val);
+                }
+            }
+
+            if !samples.is_empty() {
+                return Ok(vec![TraceSegment {
+                    network: "XX".to_string(),
+                    station: "SIM".to_string(),
+                    location: "00".to_string(),
+                    channel,
+                    starttime,
+                    samples,
+                    sampling_rate: 100.0, // Assuming 100Hz for rsudp
+                }]);
+            }
+        }
+    }
+
     // Try JSON first if it starts with '['
     if data.starts_with(b"[")
         && let Ok(values) = serde_json::from_slice::<Vec<serde_json::Value>>(data)
