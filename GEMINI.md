@@ -39,6 +39,7 @@ Auto-generated from all feature plans. Last updated: 2025-12-19
 - Temporary directories for test outputs. (020-add-e2e-alert-test)
 - Rust 1.7x (Edition 2024) + None (021-cleanup-project-files)
 - Filesystem (021-cleanup-project-files)
+- local filesystem (temporary PNGs), Amazon S3 (public image hosting). (023-sns-posting)
 
 - Rust 1.7x (latest stable) + None (requires Rust toolchain: `rustc`, `cargo`) (001-init-rust-project)
 
@@ -58,9 +59,9 @@ cargo test [ONLY COMMANDS FOR ACTIVE TECHNOLOGIES][ONLY COMMANDS FOR ACTIVE TECH
 Rust 1.7x (latest stable): Follow standard conventions
 
 ## Recent Changes
+- 023-sns-posting: Added Rust 1.7x (Edition 2024)
 - 021-cleanup-project-files: Added Rust 1.7x (Edition 2024) + None
 - 020-add-e2e-alert-test: Added Rust 1.7x (Edition 2024) + `std::process::Command` (process spawning), `tempfile` (isolated environments), `regex` (log parsing), `tokio` (async test runner), `port_selector` or equivalent logic (dynamic ports).
-- 019-restore-sta-lta-alert: Added Rust 1.7x (Edition 2024) + `rsudp-rust` internal modules (`trigger`, `pipeline`)
 
 
 <!-- MANUAL ADDITIONS START -->

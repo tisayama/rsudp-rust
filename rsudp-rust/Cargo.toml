@@ -28,6 +28,11 @@ plotters = { version = "0.3", default-features = false, features = ["bitmap_back
 lettre = { version = "0.11", default-features = false, features = ["tokio1-rustls-tls", "smtp-transport", "builder", "hostname"] }
 uuid = { version = "1.0", features = ["v4", "serde"] }
 colorous = "1.0"
+async-trait = "0.1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "rustls-tls"] }
+aws-config = { version = "1.1", default-features = false, features = ["rustls"] }
+aws-sdk-s3 = { version = "1.1", default-features = false, features = ["rustls", "rt-tokio"] }
+aws-sdk-sns = { version = "1.1", default-features = false, features = ["rustls", "rt-tokio"] }
 
 [dev-dependencies]
 csv = "1.3"

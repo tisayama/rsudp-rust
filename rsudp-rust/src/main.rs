@@ -11,6 +11,9 @@ use clap::Parser;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use rsudp_rust::web::sns::SNSManager;
+use std::sync::Arc;
+
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
@@ -189,13 +192,18 @@ async fn main() {
         None
     };
 
-    // 4. Simulation or Live UDP mode
+    // 4. Initialize SNS Manager
+    let sns_manager = Arc::new(SNSManager::from_settings(&settings).await);
+
+    // 5. Simulation or Live UDP mode
     let sm = sens_map.clone();
+    let sns = Some(sns_manager.clone());
     if let Some(path) = args.file {
         tracing::info!("Simulation mode: processing file {}", path);
         let ws = web_state.clone();
+        let sns_sim = sns.clone();
         let pipeline_handle = tokio::spawn(async move {
-            run_pipeline(pipe_rx, trigger_config, intensity_config, ws, sm).await;
+            run_pipeline(pipe_rx, trigger_config, intensity_config, ws, sm, sns_sim).await;
         });
 
         let bytes = std::fs::read(&path).unwrap();
@@ -210,8 +218,9 @@ async fn main() {
     } else {
         // LIVE UDP MODE
         let ws = web_state.clone();
+        let sns_live = sns.clone();
         tokio::spawn(async move {
-            run_pipeline(pipe_rx, trigger_config, intensity_config, ws, sm).await;
+            run_pipeline(pipe_rx, trigger_config, intensity_config, ws, sm, sns_live).await;
         });
 
         let (recv_tx, mut recv_rx) = mpsc::channel(100);

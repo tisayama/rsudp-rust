@@ -10,12 +10,16 @@ use uuid::Uuid;
 use std::time::Duration;
 use chrono::Utc;
 
+use crate::web::sns::{SNSManager, NotificationEvent};
+use std::sync::Arc;
+
 pub async fn run_pipeline(
     mut receiver: mpsc::Receiver<Vec<u8>>,
     trigger_config: TriggerConfig,
     intensity_config: Option<IntensityConfig>,
     web_state: WebState,
     sensitivity_map: HashMap<String, f64>,
+    sns_manager: Option<Arc<SNSManager>>,
 ) {
     info!("Pipeline started");
     let mut tm = TriggerManager::new(trigger_config);
@@ -89,6 +93,22 @@ pub async fn run_pipeline(
                                 }
                             });
 
+                            // 1b. SNS Trigger Notification
+                            if let Some(sns) = sns_manager.clone() {
+                                let event = NotificationEvent {
+                                    event_type: AlertEventType::Trigger,
+                                    timestamp: alert.timestamp,
+                                    station_id: format!("{}.{}", segment.network, segment.station),
+                                    channel: segment.channel.clone(),
+                                    max_ratio: alert.ratio,
+                                    max_intensity: 0.0,
+                                    snapshot_path: None,
+                                };
+                                tokio::spawn(async move {
+                                    sns.notify_trigger(&event).await;
+                                });
+                            }
+
                             // 2. Schedule Snapshot Generation & Summary Notification
                             info!("Acquiring settings read lock...");
                             let plot_settings = web_state.settings.read().unwrap().clone();
@@ -100,6 +120,7 @@ pub async fn run_pipeline(
                             let alert_sta = segment.station.clone();
                             let s_map = sensitivity_map.clone();
                             let t_settings_reset = settings.clone();
+                            let sns_for_reset = sns_manager.clone();
 
                             info!("Scheduling snapshot task. Delay: {:?}, Window: {}s, SavePct: {}", delay, plot_settings.window_seconds, plot_settings.save_pct);
 
@@ -162,6 +183,22 @@ pub async fn run_pipeline(
                                 // Send Reset (Summary) Email
                                 if let Err(e) = crate::web::alerts::send_reset_email(&t_settings_reset, &alert_ch, trigger_time, Utc::now(), max_int, snapshot_path.as_ref().map(|p| format!("http://localhost:8080/images/alerts/{}", p)).as_deref(), &intensity_message) {
                                     warn!("Failed to send reset email: {}", e);
+                                }
+
+                                // 1c. SNS Reset Notification
+                                if let Some(sns) = sns_for_reset.clone() {
+                                    let event = NotificationEvent {
+                                        event_type: AlertEventType::Reset,
+                                        timestamp: Utc::now(),
+                                        station_id: alert_sta.clone(),
+                                        channel: alert_ch.clone(),
+                                        max_ratio: alert.max_ratio,
+                                        max_intensity: max_int,
+                                        snapshot_path: snapshot_path.as_ref().map(|p| out_dir.join("alerts").join(p)),
+                                    };
+                                    tokio::spawn(async move {
+                                        sns.notify_reset(&event).await;
+                                    });
                                 }
 
                                 // Update history and broadcast

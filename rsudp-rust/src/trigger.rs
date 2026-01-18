@@ -15,6 +15,7 @@ pub struct AlertEvent {
     pub channel: String,
     pub event_type: AlertEventType,
     pub ratio: f64,
+    pub max_ratio: f64,
     pub message: String,
 }
 
@@ -207,6 +208,7 @@ impl TriggerManager {
                 channel: id.to_string(),
                 event_type: AlertEventType::Trigger,
                 ratio,
+                max_ratio: ratio,
                 message,
             });
         } else if state.triggered {
@@ -222,6 +224,7 @@ impl TriggerManager {
                     channel: id.to_string(),
                     event_type: AlertEventType::Reset,
                     ratio,
+                    max_ratio: state.max_ratio,
                     message,
                 };
                 return Some(ev);
