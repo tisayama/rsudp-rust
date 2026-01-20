@@ -60,9 +60,9 @@ cargo test [ONLY COMMANDS FOR ACTIVE TECHNOLOGIES][ONLY COMMANDS FOR ACTIVE TECH
 Rust 1.7x (latest stable): Follow standard conventions
 
 ## Recent Changes
+- 025-fix-trigger-params: Added Rust 1.7x (Edition 2024)
 - 024-sta-lta-fix: Added Rust 1.7x (Edition 2024) + None (Standard Library + internal logic)
 - 023-sns-posting: Added Rust 1.7x (Edition 2024)
-- 021-cleanup-project-files: Added Rust 1.7x (Edition 2024) + None
 
 
 <!-- MANUAL ADDITIONS START -->

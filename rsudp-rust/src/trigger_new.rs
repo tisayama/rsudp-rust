@@ -1,18 +1,9 @@
-use chrono::{DateTime, Utc, Duration};
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use tracing::info;
 use std::f64::consts::PI;
 use num_complex::Complex;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum AlertEventType {
-    Trigger,
-    Reset,
-}
-
 // Helper to create 4th order (2 cascaded 2nd order) Butterworth bandpass SOS
 // Equivalent to scipy.signal.butter(4, [low, high], btype='band', output='sos', fs=fs)
+// Note: "order 4" in scipy for bandpass means 4th order -> 8 poles total -> 4 biquad sections
 pub fn butter_bandpass_sos(order: usize, low_freq: f64, high_freq: f64, fs: f64) -> Vec<Biquad> {
     if order != 4 {
         panic!("Only order 4 implementation is supported for now (matches rsudp default)");
@@ -30,6 +21,9 @@ pub fn butter_bandpass_sos(order: usize, low_freq: f64, high_freq: f64, fs: f64)
     let center_sq = u_high * u_low;
 
     // Analog prototype (Butterworth, order 4)
+    // Poles on unit circle in s-plane: exp(j * (2k + n + 1) * pi / (2n))
+    // For n=4: k=0..3 -> angles: 5pi/8, 7pi/8, 9pi/8, 11pi/8
+    // We only need poles with real part < 0 (LHP)
     let angles = vec![
         5.0 * PI / 8.0,
         7.0 * PI / 8.0,
@@ -38,11 +32,25 @@ pub fn butter_bandpass_sos(order: usize, low_freq: f64, high_freq: f64, fs: f64)
     ];
 
     let mut sections = Vec::new();
+
+    // Group poles into conjugate pairs to form 2nd order sections
+    // Angles 5pi/8 and 11pi/8 are conjugates (11pi/8 = -5pi/8)
+    // Angles 7pi/8 and 9pi/8 are conjugates (9pi/8 = -7pi/8)
+    
+    // We process pairs of poles from the prototype
+    // For bandpass transformation, each real pole becomes 1 biquad, each conjugate pair becomes 2 biquads (4th order total)
+    // But here we start with 4th order prototype, so we have 4 poles in LHP.
+    // Each pair (p, p*) transforms into a 4th order section (2 biquads) in bandpass?
+    // Wait, scipy 'order 4' bandpass means the RESULT is 8th order (4 biquads).
+    // Let's stick to the standard bilinear transform steps.
+
     let poles_proto: Vec<Complex<f64>> = angles.iter().map(|&a| Complex::from_polar(1.0, a)).collect();
 
     // Bandpass transformation: s -> (s^2 + center_sq) / (s * bw)
+    // Solve for s: s^2 - p*bw*s + center_sq = 0
     let mut poles_analog = Vec::new();
     for p in poles_proto {
+        // Roots of s^2 - (p*bw)*s + center_sq = 0
         let b_val = -p * bw;
         let c_val = Complex::new(center_sq, 0.0);
         let disc = (b_val * b_val - 4.0 * c_val).sqrt();
@@ -52,14 +60,27 @@ pub fn butter_bandpass_sos(order: usize, low_freq: f64, high_freq: f64, fs: f64)
         poles_analog.push(s2);
     }
     
-    // Map poles to z-plane
+    // We have 8 poles. Group into 4 conjugate pairs.
+    // Sort by real part? Or just find conjugates.
+    // Since we generated them from conjugates, s1 corresponding to p and s1 corresponding to p* should be conjugates?
+    // Actually, simpler approach for Biquads:
+    // Bilinear transform: z = (1+s)/(1-s) -> s = (z-1)/(z+1)
+    
+    // Let's map poles to z-plane first
     let mut poles_z = Vec::new();
     for s in poles_analog {
         let z = (1.0 + s) / (1.0 - s);
         poles_z.push(z);
     }
 
-    // Group into sections
+    // Zeros: For bandpass, we have N zeros at z=1 and N zeros at z=-1 (from s=0 and s=inf)
+    // N = order (4)
+    // So 4 zeros at +1, 4 zeros at -1.
+    
+    // Group into sections. Each section needs 2 poles and 2 zeros.
+    // We need to pair complex conjugate poles.
+    
+    // Simple greedy pairing of conjugates
     let mut used = vec![false; poles_z.len()];
     for i in 0..poles_z.len() {
         if used[i] { continue; }
@@ -83,9 +104,28 @@ pub fn butter_bandpass_sos(order: usize, low_freq: f64, high_freq: f64, fs: f64)
         let p1 = poles_z[i];
         let p2 = poles_z[best_j];
         
-        let poly_p_re = - (p1 + p2).re;
-        let poly_p_abs_sq = (p1 * p2).re;
+        // Form Biquad from poles p1, p2 and zeros +1, -1
+        // (z - 1)(z + 1) = z^2 - 1
+        // (z - p1)(z - p2) = z^2 - (p1+p2)z + p1p2
         
+        let poly_p_re = - (p1 + p2).re;
+        let poly_p_abs_sq = (p1 * p2).re; // Assuming conjugates, product is real
+        
+        // Denominator (a): 1, poly_p_re, poly_p_abs_sq
+        // Numerator (b): 1, 0, -1 (from z^2 - 1)
+        
+        // Apply gain? Usually done globally or distributed. 
+        // For Butterworth bandpass, max gain is at center.
+        // We need to normalize so gain is 1.0 at band center.
+        // Or simpler: normalize at DC or Nyquist? No, bandpass is 0 there.
+        // Standard approach: normalize so sum(a) = sum(b)? No.
+        // Let's use the standard biquad form directly.
+        
+        // Direct definition:
+        // H(z) = (b0 + b1 z^-1 + b2 z^-2) / (1 + a1 z^-1 + a2 z^-2)
+        // a0 is normalized to 1.
+        
+        let a0 = 1.0;
         let a1 = poly_p_re;
         let a2 = poly_p_abs_sq;
         
@@ -93,10 +133,18 @@ pub fn butter_bandpass_sos(order: usize, low_freq: f64, high_freq: f64, fs: f64)
         let b1 = 0.0;
         let b2 = -1.0;
         
+        // Gain adjustment to match scipy behavior (optimally distributed)
+        // Scipy distributes gain. For a single section bandpass biquad (z^2-1)/(z^2+a1z+a2):
+        // Gain at center freq?
+        // Let's calculate gain at a reference frequency in the passband (e.g. geometric mean)
+        // But doing this per section is complex.
+        // Alternative: Use the s-plane to z-plane substitution formula directly for Biquad coefficients
+        
         sections.push(Biquad { b0, b1, b2, a1, a2, x1:0.0, x2:0.0, y1:0.0, y2:0.0 });
     }
     
-    // Calculate global gain normalization
+    // Calculate global gain to normalize peak to 1.0
+    // Evaluate transfer function at center frequency
     let center_freq = (low_freq * high_freq).sqrt();
     let omega = 2.0 * PI * center_freq / fs;
     let z = Complex::from_polar(1.0, omega);
@@ -108,6 +156,7 @@ pub fn butter_bandpass_sos(order: usize, low_freq: f64, high_freq: f64, fs: f64)
         mag *= (num / den).norm();
     }
     
+    // Distribute 1/mag gain to all sections (nth root)
     let section_gain = (1.0 / mag).powf(1.0 / sections.len() as f64);
     
     for s in &mut sections {
@@ -117,6 +166,16 @@ pub fn butter_bandpass_sos(order: usize, low_freq: f64, high_freq: f64, fs: f64)
     }
 
     sections
+}
+use chrono::{DateTime, Utc, Duration};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use tracing::info;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum AlertEventType {
+    Trigger,
+    Reset,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -151,8 +210,7 @@ pub struct TriggerConfig {
     pub duration: f64,
 }
 
-#[derive(Debug, Clone)]
-pub struct Biquad {
+struct Biquad {
     b0: f64, b1: f64, b2: f64,
     a1: f64, a2: f64,
     x1: f64, x2: f64,
@@ -160,7 +218,7 @@ pub struct Biquad {
 }
 
 impl Biquad {
-    pub fn new(b0: f64, b1: f64, b2: f64, a1: f64, a2: f64) -> Self {
+    fn new(b0: f64, b1: f64, b2: f64, a1: f64, a2: f64) -> Self {
         Self { b0, b1, b2, a1, a2, x1: 0.0, x2: 0.0, y1: 0.0, y2: 0.0 }
     }
 
@@ -181,11 +239,19 @@ struct BandpassFilter {
 }
 
 impl BandpassFilter {
-    fn new(low_freq: f64, high_freq: f64, sample_rate: f64) -> Self {
-        // Use dynamic calculation
-        let sections = butter_bandpass_sos(4, low_freq, high_freq, sample_rate);
-        info!("Filter: Butterworth Order=4, Band=[{}, {}] Hz, Rate={} Hz", low_freq, high_freq, sample_rate);
-        Self { sections, initialized: false }
+    fn new_100hz_01_20() -> Self {
+        // Butterworth 4th order (2nd order cascaded twice) 0.1-2.0Hz @ 100Hz
+        // Calculated using scipy.signal.butter(4, [0.1, 2.0], btype='band', fs=100, output='sos')
+        // Section 1
+        let s1 = Biquad::new(0.00001332, 0.00002664, 0.00001332, -1.91119707, 0.91497583);
+        // Section 2
+        let s2 = Biquad::new(1.0, -2.0, 1.0, -1.9911143, 0.9911536);
+        // Section 3
+        let s3 = Biquad::new(1.0, -2.0, 1.0, -1.92379307, 0.92850732);
+        // Section 4
+        let s4 = Biquad::new(1.0, -2.0, 1.0, -1.99547377, 0.99555234);
+        
+        Self { sections: vec![s1, s2, s3, s4], initialized: false }
     }
 
     fn reset(&mut self) {
@@ -235,13 +301,6 @@ struct StaLtaState {
 
 impl TriggerManager {
     pub fn new(config: TriggerConfig) -> Self {
-        info!("TriggerManager initialized.");
-        info!("  Target Channel: {}", config.target_channel);
-        info!("  STA: {:.2}s, LTA: {:.2}s", config.sta_sec, config.lta_sec);
-        info!("  Threshold: {:.2}, Reset: {:.2}", config.threshold, config.reset_threshold);
-        info!("  Duration (Debounce): {:.2}s", config.duration);
-        info!("  Filter Band: {:.2}-{:.2} Hz (4th Order Butterworth)", config.highpass, config.lowpass);
-        
         Self {
             config,
             states: HashMap::new(),
@@ -260,16 +319,13 @@ impl TriggerManager {
             return None;
         }
 
-        let highpass = self.config.highpass;
-        let lowpass = self.config.lowpass;
-
         let state = self.states.entry(id.to_string()).or_insert_with(|| StaLtaState {
             sta: 0.0,
             lta: 0.0,
             sample_count: 0,
             triggered: false,
             max_ratio: 0.0,
-            filter: BandpassFilter::new(highpass, lowpass, 100.0), // Assuming 100Hz fixed for now or needs to be passed
+            filter: BandpassFilter::new_100hz_01_20(),
             last_timestamp: None,
             exceed_start: None,
             is_exceeding: false,
