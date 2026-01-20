@@ -173,6 +173,7 @@ async fn main() {
         highpass: settings.alert.highpass,
         lowpass: settings.alert.lowpass,
         target_channel: settings.alert.channel.clone(),
+        duration: settings.alert.duration,
     };
 
     let channels_str = args.channels.unwrap_or_else(|| "ENE,ENN,ENZ".to_string());

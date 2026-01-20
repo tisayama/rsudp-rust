@@ -38,6 +38,7 @@ pub struct TriggerConfig {
     pub highpass: f64,
     pub lowpass: f64,
     pub target_channel: String, // e.g. "EHZ" or "HZ" (suffix match)
+    pub duration: f64,
 }
 
 struct Biquad {
@@ -70,10 +71,18 @@ struct BandpassFilter {
 
 impl BandpassFilter {
     fn new_100hz_01_20() -> Self {
-        // Butterworth 2nd order (4th order cascaded) 0.1-2.0Hz @ 100Hz
-        let s1 = Biquad::new(0.00362168, 0.00724336, 0.00362168, -1.91119707, 0.91497583);
+        // Butterworth 4th order (2nd order cascaded twice) 0.1-2.0Hz @ 100Hz
+        // Calculated using scipy.signal.butter(4, [0.1, 2.0], btype='band', fs=100, output='sos')
+        // Section 1
+        let s1 = Biquad::new(0.00001332, 0.00002664, 0.00001332, -1.91119707, 0.91497583);
+        // Section 2
         let s2 = Biquad::new(1.0, -2.0, 1.0, -1.9911143, 0.9911536);
-        Self { sections: vec![s1, s2], initialized: false }
+        // Section 3
+        let s3 = Biquad::new(1.0, -2.0, 1.0, -1.92379307, 0.92850732);
+        // Section 4
+        let s4 = Biquad::new(1.0, -2.0, 1.0, -1.99547377, 0.99555234);
+        
+        Self { sections: vec![s1, s2, s3, s4], initialized: false }
     }
 
     fn reset(&mut self) {
@@ -117,6 +126,8 @@ struct StaLtaState {
     max_ratio: f64,
     filter: BandpassFilter,
     last_timestamp: Option<DateTime<Utc>>,
+    exceed_start: Option<DateTime<Utc>>,
+    is_exceeding: bool,
 }
 
 impl TriggerManager {
@@ -147,6 +158,8 @@ impl TriggerManager {
             max_ratio: 0.0,
             filter: BandpassFilter::new_100hz_01_20(),
             last_timestamp: None,
+            exceed_start: None,
+            is_exceeding: false,
         });
 
         // Detect jump
@@ -161,6 +174,8 @@ impl TriggerManager {
                 state.triggered = false;
                 state.max_ratio = 0.0;
                 state.filter.reset();
+                state.exceed_start = None;
+                state.is_exceeding = false;
             }
         }
         state.last_timestamp = Some(timestamp);
@@ -183,57 +198,77 @@ impl TriggerManager {
         state.sta = (1.0 - sta_alpha) * state.sta + sta_alpha * val;
         state.lta = (1.0 - lta_alpha) * state.lta + lta_alpha * val;
 
-        // 4. Warm-up Check (Wait for LTA window)
-        let lta_samples = (self.config.lta_sec * 100.0) as u64;
-        if state.sample_count < lta_samples {
-            return None;
-        }
-
-        // Avoid division by zero
-        let ratio = if state.lta > 1e-20 {
-            state.sta / state.lta
-        } else {
-            0.0
-        };
-
-        if !state.triggered && ratio > self.config.threshold {
-            state.triggered = true;
-            state.max_ratio = ratio;
-            let message = format!(
-                "Trigger threshold {} exceeded (ratio: {:.4}). ALARM!",
-                self.config.threshold, ratio
-            );
-            return Some(AlertEvent {
-                timestamp,
-                channel: id.to_string(),
-                event_type: AlertEventType::Trigger,
-                ratio,
-                max_ratio: ratio,
-                message,
-            });
-        } else if state.triggered {
-            state.max_ratio = state.max_ratio.max(ratio);
-            if ratio < self.config.reset_threshold {
-                state.triggered = false;
-                let message = format!(
-                    "Ratio {:.4} fell below reset threshold {}. RESET. Max ratio: {:.4}",
-                    ratio, self.config.reset_threshold, state.max_ratio
-                );
-                let ev = AlertEvent {
-                    timestamp,
-                    channel: id.to_string(),
-                    event_type: AlertEventType::Reset,
-                    ratio,
-                    max_ratio: state.max_ratio,
-                    message,
+                // 4. Warm-up Check (Wait for LTA window)
+                // Use wait_pkts logic: LTA seconds of data MUST be seen before evaluating trigger
+                let lta_samples = (self.config.lta_sec * 100.0) as u64;
+                if state.sample_count < lta_samples {
+                    return None;
+                }
+        
+                // Avoid division by zero
+                let ratio = if state.lta > 1e-20 {
+                    state.sta / state.lta
+                } else {
+                    0.0
                 };
-                return Some(ev);
-            }
-        }
-
+        
+                let ratio_exceeded = ratio > self.config.threshold;
+        
+                if !state.triggered {
+                    if ratio_exceeded {
+                        if !state.is_exceeding {
+                            state.is_exceeding = true;
+                            state.exceed_start = Some(timestamp);
+                        }
+        
+                        // Check duration
+                        if let Some(start) = state.exceed_start {
+                            let elapsed = (timestamp - start).num_milliseconds() as f64 / 1000.0;
+                            if elapsed >= self.config.duration {
+                                state.triggered = true;
+                                state.max_ratio = ratio;
+                                state.is_exceeding = false; // Reset exceeding state once triggered
+                                let message = format!(
+                                    "Trigger threshold {} exceeded for {}s (ratio: {:.4}). ALARM!",
+                                    self.config.threshold, self.config.duration, ratio
+                                );
+                                return Some(AlertEvent {
+                                    timestamp,
+                                    channel: id.to_string(),
+                                    event_type: AlertEventType::Trigger,
+                                    ratio,
+                                    max_ratio: ratio,
+                                    message,
+                                });
+                            }
+                        }
+                    } else {
+                        // Ratio fell below threshold before duration met
+                        state.is_exceeding = false;
+                        state.exceed_start = None;
+                    }
+                } else if state.triggered {
+                    state.max_ratio = state.max_ratio.max(ratio);
+                    if ratio < self.config.reset_threshold {
+                        state.triggered = false;
+                        let message = format!(
+                            "Ratio {:.4} fell below reset threshold {}. RESET. Max ratio: {:.4}",
+                            ratio, self.config.reset_threshold, state.max_ratio
+                        );
+                        let ev = AlertEvent {
+                            timestamp,
+                            channel: id.to_string(),
+                            event_type: AlertEventType::Reset,
+                            ratio,
+                            max_ratio: state.max_ratio,
+                            message,
+                        };
+                        return Some(ev);
+                    }
+                }
+        
                 None
-
-            }
+                    }
 
         }
 
