@@ -14,7 +14,7 @@ echo "Waiting for rsudp-rust to initialize..."
 sleep 5
 
 echo "Streaming data to Rust rsudp..."
-./rsudp-rust/target/release/streamer --file references/mseed/fdsnws.mseed --addr 127.0.0.1:8888 --speed 100.0
+./rsudp-rust/target/release/streamer --file references/mseed/fdsnws.mseed --addr 127.0.0.1:9999 --speed 1.0
 
 echo "Stream complete. Waiting for processing..."
 sleep 5

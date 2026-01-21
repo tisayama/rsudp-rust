@@ -7,36 +7,32 @@ def parse_log(filepath, label):
     events = []
     # Regex for rsudp log timestamp: YYYY-MM-DD HH:MM:SS.mmmmmm
     # Example: "Trigger threshold 1.1 exceeded at 2025-11-25 09:01:23.995000"
-    trigger_pattern = re.compile(r"Trigger threshold .* exceeded .*at (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d+)")
+    # Python log sometimes has "Trigger threshold of 1.1 ..."
+    trigger_pattern_py = re.compile(r"Trigger threshold .* exceeded at (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d+)")
     
-    # Example: "Earthquake trigger reset ... at 2025-11-25 09:01:33.054999" (simplified matching)
-    reset_pattern = re.compile(r"trigger reset .* at (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d+)")
-
-    # Rust log format might differ slightly, let's assume it matches the rsudp-compatible output we implemented.
-    # Rust: "[2025-11-25 09:01:23.995 UTC] Channel ...: Trigger threshold ..." 
-    # We need to handle both or standardize. 
-    # Let's assume the Rust implementation output format matches what we saw in previous logs or rsudp.
-    # Rust trigger.rs: "[{}] Channel {}: {}" -> [Timestamp] Channel ID: Message
-    # Rust Message: "Trigger threshold {} exceeded (ratio: {:.4}). ALARM!"
-    
-    # Adjust regex for Rust format if needed. 
-    # Let's look for timestamps generally associated with "ALARM!" or "Trigger threshold"
+    # Rust: [2025-11-25 09:01:23.455000095 UTC] Channel ...
+    trigger_pattern_rs = re.compile(r"\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d+) UTC\]")
     
     with open(filepath, 'r') as f:
         for line in f:
-            if "Trigger threshold" in line and ("exceeded" in line or "ALARM" in line):
-                # Try rsudp style first
-                match = trigger_pattern.search(line)
-                if match:
-                    events.append({'type': 'Trigger', 'time': match.group(1), 'source': label})
-                    continue
+            # Remove ANSI color codes for safer regex
+            clean_line = re.sub(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])', '', line)
+            
+            if "Trigger threshold" in clean_line and ("exceeded" in clean_line or "ALARM" in clean_line):
+                if label == 'Python':
+                    match = trigger_pattern_py.search(clean_line)
+                    if match:
+                        # Truncate/Pad microseconds to 6 digits for consistent parsing
+                        ts = match.group(1)
+                        if len(ts.split('.')[1]) > 6: ts = ts[:26]
+                        events.append({'type': 'Trigger', 'time': ts, 'source': label})
                 
-                # Try Rust style: [2025-11-25T09:01:23.995000095Z] ...
-                # Or the format from AlertEvent::fmt: [2025-11-25 09:01:23.995000095 UTC]
-                rust_match = re.search(r"\[(.*?)\].*Trigger threshold", line)
-                if rust_match:
-                    ts_str = rust_match.group(1).replace(" UTC", "").replace("T", " ").replace("Z", "")
-                    events.append({'type': 'Trigger', 'time': ts_str, 'source': label})
+                elif label == 'Rust':
+                    match = trigger_pattern_rs.search(clean_line)
+                    if match:
+                        ts = match.group(1)
+                        if len(ts.split('.')[1]) > 6: ts = ts[:26]
+                        events.append({'type': 'Trigger', 'time': ts, 'source': label})
 
     return events
 

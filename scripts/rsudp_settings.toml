@@ -1,5 +1,5 @@
 [settings]
-port = 8888
+port = 9999
 station = "R6E01"
 output_dir = "rsudp"
 debug = true
