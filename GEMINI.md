@@ -41,6 +41,7 @@ Auto-generated from all feature plans. Last updated: 2025-12-19
 - Filesystem (021-cleanup-project-files)
 - local filesystem (temporary PNGs), Amazon S3 (public image hosting). (023-sns-posting)
 - Rust 1.7x (Edition 2024) + None (Standard Library + internal logic) (024-sta-lta-fix)
+- Log files in `logs/` directory. (026-rsudp-test-run)
 
 - Rust 1.7x (latest stable) + None (requires Rust toolchain: `rustc`, `cargo`) (001-init-rust-project)
 
@@ -60,9 +61,9 @@ cargo test [ONLY COMMANDS FOR ACTIVE TECHNOLOGIES][ONLY COMMANDS FOR ACTIVE TECH
 Rust 1.7x (latest stable): Follow standard conventions
 
 ## Recent Changes
+- 026-rsudp-test-run: Added Log files in `logs/` directory.
 - 025-fix-trigger-params: Added Rust 1.7x (Edition 2024)
 - 024-sta-lta-fix: Added Rust 1.7x (Edition 2024) + None (Standard Library + internal logic)
-- 023-sns-posting: Added Rust 1.7x (Edition 2024)
 
 
 <!-- MANUAL ADDITIONS START -->

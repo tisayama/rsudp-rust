@@ -1,10 +1,9 @@
 <!--
 SYNC IMPACT REPORT
-- Version: 1.1.0 → 1.2.0 (MINOR bump)
-- Change: Added principles for self-verification before commit and master branch protection.
-- Principles Added:
-  - VII. 自己検証の義務 (Mandatory Self-Verification)
-  - VIII. ブランチ運用とトレーサビリティ (Branch Strategy and Traceability)
+- Version: 1.2.0 → 1.2.1 (PATCH bump)
+- Change: Added strict adherence to theoretical and logical correctness for seismic calculation accuracy.
+- Principles Modified:
+  - I. 安定性と信頼性 (Stability and Reliability) - Expanded to emphasize theoretical correctness over quick fixes.
 - Templates Checked:
   - .specify/templates/plan-template.md (✅ No changes needed)
   - .specify/templates/spec-template.md (✅ No changes needed)
@@ -15,10 +14,10 @@ SYNC IMPACT REPORT
 ## 基本原則 (Core Principles)
 
 ### I. 安定性と信頼性 (Stability and Reliability)
-重大な地震データとアラートを扱うため、システムは非常に安定かつ信頼性が高くなければなりません。すべてのコードは堅牢で、エラー処理が徹底され、予期せぬ入力やシステム状態に対して回復力を持つ必要があります。
+重大な地震データとアラートを扱うため、システムは非常に安定かつ信頼性が高くなければなりません。すべてのコードは堅牢で、エラー処理が徹底され、予期せぬ入力やシステム状態に対して回復力を持つ必要があります。**また、地震動計算などのコアロジックの実装においては、短絡的な解決法よりも理論的・論理的に正しい解法を優先し、慎重に実装する必要があります。**
 
 ### II. 厳密なテスト (Rigorous Testing)
-すべてのコンポーネントには、単体テスト、結合テストを含む包括的なテストが伴わなければなりません。計算の正確性を保証するため、テストデータは適切に管理され、現実世界のシナリオを反映する必要があります。これは譲歩不可能な要件です。
+すべてのコンポーネントには、単体テスト、結合テストを含む包括的なテストが伴わなければなりません。計算の正確性を保証するため、テストデータは適切に管理され、現実世界のシナリオを反映する必要があります。これは譲歩不可能な要件です。開発を終了するためにはテストを行い、ユーザーの同意をとり、マージする必要があります。
 
 ### III. 高いパフォーマンス (High Performance)
 PythonアプリケーションのRustによる書き直しとして、大幅なパフォーマンス向上が重要な目標です。コードは、明瞭性や保守性を犠牲にすることなく、速度と低リソース消費のために最適化されるべきです。
@@ -40,7 +39,7 @@ WebUIを実装する場合、通信にはREST APIおよびWebSockets（サーバ
 
 ## 開発ワークフロー (Development Workflow)
 
-本プロジェクトでは、仕様駆動開発（Specification-Driven Development）を採用します。新しい機能の実装や既存機能の変更は、必ず事前に仕様書を作成し、関係者の合意を得てから着手します。
+本プロジェクトでは、仕様駆動開発（Specification-Driven Development）を採用します。新しい機能の実装や既存機能の変更は、必ず事前に仕様書を作成し、関係者の合意を得てから着手します。開発の完了には、テストの実施、ユーザーの同意、そしてマージが必須です。
 
 ## 品質ゲート (Quality Gates)
 
@@ -53,4 +52,4 @@ WebUIを実装する場合、通信にはREST APIおよびWebSockets（サーバ
 
 この憲法は、他のすべての慣行や規約に優先します。憲法の改正には、変更内容の文書化、主要な貢献者による承認、そして必要に応じた既存コードベースへの移行計画が必要です。すべてのプルリクエストとコードレビューは、この憲法の原則に準拠しているか検証する必要があります。
 
-**バージョン**: 1.2.0 | **制定日**: 2025-12-18 | **最終改正日**: 2026-01-18
+**バージョン**: 1.2.1 | **制定日**: 2025-12-18 | **最終改正日**: 2026-01-18

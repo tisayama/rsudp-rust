@@ -1,0 +1,21 @@
+[settings]
+port = 8888
+station = "R6E01"
+output_dir = "rsudp"
+debug = true
+
+[alert]
+enabled = true
+channel = "HZ"
+sta = 6.0
+lta = 30.0
+duration = 0.0
+threshold = 1.1
+reset = 0.5
+highpass = 0.1
+lowpass = 2.0
+deconvolve = false
+units = "VEL"
+on_plot = false
+on_plot_end_line_color = "#D72638"
+on_plot_start_line_color = "#4C8BF5"
