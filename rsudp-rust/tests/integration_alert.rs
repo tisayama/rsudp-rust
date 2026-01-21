@@ -11,6 +11,7 @@ async fn test_sta_lta_trigger() {
         highpass: 0.1,
         lowpass: 5.0,
         target_channel: "HZ".to_string(),
+        duration: 0.0,
     });
 
     let id = "TEST.EHZ";

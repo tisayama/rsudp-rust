@@ -26,7 +26,7 @@ sleep 10
 
 echo "Streaming data to Python rsudp..."
 # Send data to localhost:9999 (avoiding port 8888 conflict)
-./rsudp-rust/target/release/streamer --file references/mseed/fdsnws.mseed --addr 127.0.0.1:9999 --speed 1.0
+./rsudp-rust/target/release/streamer --file references/mseed/fdsnws.mseed --addr 127.0.0.1:9999 --speed 100.0
 
 echo "Stream complete. Waiting for processing..."
 sleep 5
