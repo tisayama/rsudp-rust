@@ -22,6 +22,8 @@ pub struct PlotSettings {
     pub window_seconds: f64,
     pub save_pct: f64,
     pub output_dir: PathBuf,
+    pub deconvolve: bool,
+    pub units: String,
 }
 
 #[derive(Debug, Clone)]
@@ -147,6 +149,8 @@ impl WebState {
                 window_seconds: 90.0,
                 save_pct: 0.7,
                 output_dir: PathBuf::from("."),
+                deconvolve: false,
+                units: "counts".to_string(),
             })),
             history: Arc::new(Mutex::new(AlertHistoryManager::new())),
             waveform_buffers: Arc::new(Mutex::new(HashMap::new())),

@@ -41,12 +41,16 @@ pub fn parse_any(data: &[u8]) -> Result<Vec<TraceSegment>, Box<dyn std::error::E
             // Part 2+: Samples
             let mut samples = Vec::new();
             for part in parts.iter().skip(2) {
-                if let Ok(val) = part.trim().parse::<f64>() {
+                let trimmed = part.trim();
+                if let Ok(val) = trimmed.parse::<f64>() {
                     samples.push(val);
+                } else {
+                    tracing::warn!("Failed to parse sample: '{}'", trimmed);
                 }
             }
 
             if !samples.is_empty() {
+                tracing::debug!("Parsed {} samples for channel {}", samples.len(), channel);
                 return Ok(vec![TraceSegment {
                     network: "XX".to_string(),
                     station: "SIM".to_string(),

@@ -95,6 +95,8 @@ async fn main() {
             std::process::exit(1);
         }
     };
+    
+    tracing::info!("LOADED CONFIG: threshold={}, reset={}, port={}", settings.alert.threshold, settings.alert.reset, settings.settings.port);
 
     // 3. Override Settings with CLI Args
     if let Some(p) = args.udp_port { settings.settings.port = p; }
@@ -115,6 +117,8 @@ async fn main() {
         }
         
         plot_settings.output_dir = settings.settings.output_dir.clone();
+        plot_settings.deconvolve = settings.alert.deconvolve;
+        plot_settings.units = settings.alert.units.clone();
     }
     
     // Update default history settings as well

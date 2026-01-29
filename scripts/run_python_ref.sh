@@ -14,21 +14,18 @@ echo "Starting Python rsudp reference..."
 # Assuming running from repo root, verify import paths
 export PYTHONPATH=$PYTHONPATH:$(pwd)/references/rsudp
 
-# Start rsudp client (headless if possible, or expect GUI)
-# Since we are in a headless environment, this might fail if it tries to open a window.
-# We hope it logs to stdout before crashing or can run headless.
-# If rsudp requires GUI, we might need Xvfb or skip. Assuming it works or logs enough.
-python3 references/rsudp/rsudp/client.py > logs/rsudp_python.log 2>&1 &
+# Start Python rsudp in background
+# Use 10101 port
+rsudp-venv/bin/python references/rsudp/rsudp/client.py -s scripts/rsudp_settings.json > logs/rsudp_python.log 2>&1 &
 RSUDP_PID=$!
 
-echo "Waiting for rsudp to initialize..."
-sleep 10
+sleep 5
 
 echo "Streaming data to Python rsudp..."
-# Send data to localhost:9999 (avoiding port 8888 conflict)
-./rsudp-rust/target/release/streamer --file references/mseed/fdsnws.mseed --addr 127.0.0.1:9999 --speed 100.0
+# Send data to localhost:10101
+./rsudp-rust/target/release/streamer --file references/mseed/fdsnws.mseed --addr 127.0.0.1:10101 --speed 1.0
 
-echo "Stream complete. Waiting for processing..."
+sleep 250; kill -9 $RSUDP_PID; echo "Finished 4m run"
 sleep 5
 
 kill $RSUDP_PID || true

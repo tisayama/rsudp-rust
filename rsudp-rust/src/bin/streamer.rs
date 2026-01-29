@@ -68,14 +68,16 @@ fn format_packet(channel: &str, timestamp: f64, samples: &[f64]) -> String {
     s.push_str("{'");
     s.push_str(channel);
     s.push_str("', ");
-    s.push_str(&timestamp.to_string());
+    s.push_str(&format!("{:.3}", timestamp));
     
     for sample in samples {
         s.push_str(", ");
-        s.push_str(&sample.to_string());
+        // Match Python's string conversion for samples
+        s.push_str(&format!("{}", sample));
     }
     
     s.push('}');
+    s.push('\n');
     s
 }
 
@@ -125,6 +127,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let num_chunks = chunks.len();
                     
                     for (chunk_idx, chunk) in chunks.iter().enumerate() {
+                        if i == 0 && chunk_idx == 0 {
+                            tracing::info!("First chunk samples: {:?}", &chunk[..std::cmp::min(5, chunk.len())]);
+                        }
                         // Calculate precise timestamp for this chunk within the record
                         let offset_seconds = (chunk_idx * args.samples_per_packet) as f64 / segment.sampling_rate;
                         

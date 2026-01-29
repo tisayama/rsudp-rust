@@ -1,3 +1,0 @@
-Event Index,Type,Python Time,Rust Time,Diff (s),Status
-1,Trigger,2025-11-25 09:04:25.71,2025-11-25 09:01:23.455000,-182.2550,Time Drift
-2,Trigger,N/A,2025-11-25 09:07:35.204999,N/A,Rust Only
