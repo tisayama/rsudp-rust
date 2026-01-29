@@ -63,8 +63,6 @@ Rust 1.7x (latest stable): Follow standard conventions
 ## Recent Changes
 - 027-rsudp-realtime-test: Achieved full STA/LTA logic parity with rsudp/ObsPy. Implemented Slice Mode with Direct Form II Transposed filter and Zero-forced Warmup (45s).
 - 026-rsudp-test-run: Added Log files in `logs/` directory.
-- 025-fix-trigger-params: Added Rust 1.7x (Edition 2024)
-- 024-sta-lta-fix: Added Rust 1.7x (Edition 2024) + None (Standard Library + internal logic)
 
 
 <!-- MANUAL ADDITIONS START -->

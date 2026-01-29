@@ -158,12 +158,14 @@ async fn main() {
     let sens_map = match fetch_sensitivity(&net, &sta) {
         Ok(map) => map,
         Err(e) => {
-            tracing::warn!("Could not fetch StationXML from FDSN: {}. Using default RS4D sensitivity (384,500).", e);
+            tracing::warn!("Could not fetch StationXML from FDSN: {}. Using default Raspberry Shake sensitivities.", e);
             let mut fallback = HashMap::new();
+            // Accelerometers (Counts / (m/s^2))
             fallback.insert("ENE".to_string(), 384500.0);
             fallback.insert("ENN".to_string(), 384500.0);
             fallback.insert("ENZ".to_string(), 384500.0);
-            fallback.insert("EHZ".to_string(), 384500.0);
+            // Geophone (Counts / (m/s)) - Much higher sensitivity
+            fallback.insert("EHZ".to_string(), 399000000.0);
             fallback
         }
     };
