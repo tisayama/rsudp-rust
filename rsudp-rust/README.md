@@ -70,35 +70,67 @@ In this implementation, a **Cosine Taper** is applied to the 5% edges (10% total
 ### Prerequisites
 - **Rust**: Version 1.7x or later (Edition 2024 recommended).
 - **Cargo**: Included with Rust.
+- **Dependencies**: `build-essential` (for Make and C compiler).
 
 ### Installation & Build
-```bash
-cd rsudp-rust
-cargo build --release
-```
 
-### Usage
+1. **Clone the repository**:
+   ```bash
+   git clone https://github.com/your-org/rsudp-rust.git
+   cd rsudp-rust
+   ```
 
-#### 1. Running the Receiver (Live Mode)
+2. **Build**:
+   ```bash
+   make
+   ```
+
+3. **Install to system (requires sudo)**:
+   This creates the `rsudp` user, installs the binary to `/usr/local/bin`, and sets up the systemd service.
+   ```bash
+   sudo make install
+   ```
+
+4. **Configuration**:
+   Edit the configuration file:
+   ```bash
+   sudo nano /etc/rsudp/rsudp.toml
+   ```
+
+### Service Management
+
+- **Start/Enable Service**:
+  ```bash
+  sudo systemctl start rsudp
+  sudo systemctl enable rsudp
+  ```
+
+- **Check Status**:
+  ```bash
+  sudo systemctl status rsudp
+  ```
+
+- **View Logs**:
+  ```bash
+  sudo journalctl -u rsudp -f
+  ```
+
+### Usage (Manual Mode)
+
+#### 1. Running the Receiver
 ```bash
 ./target/release/rsudp-rust --udp-port 8888 --station R6E01 --network AM
 ```
 
-#### 2. Running the Streamer (Simulation Mode)
-To stream data from a MiniSEED file to localhost for testing:
+#### 2. Running the Streamer (Simulation)
+To stream data from a MiniSEED file for testing:
 ```bash
 ./target/release/streamer --file references/mseed/fdsnws.mseed --addr 127.0.0.1:8888 --speed 1.0
 ```
 
 ### Testing
-- **Unit Tests**: Run standard unit tests.
-  ```bash
-  cargo test
-  ```
-- **E2E Alert Test**: Run the integrated end-to-end alert test.
-  ```bash
-  cargo test --test e2e_alert
-  ```
+- **Unit Tests**: `cargo test`
+- **E2E Alert Test**: `cargo test --test e2e_alert`
 
 ---
 
@@ -170,14 +202,52 @@ To stream data from a MiniSEED file to localhost for testing:
 ### 動作環境
 - Rust 1.7x (Edition 2024)
 - Cargo
+- 依存パッケージ: `build-essential`
 
 ### インストールとビルド
-```bash
-cd rsudp-rust
-cargo build --release
-```
 
-### 使い方
+1. **リポジトリのクローン**:
+   ```bash
+   git clone https://github.com/your-org/rsudp-rust.git
+   cd rsudp-rust
+   ```
+
+2. **ビルド**:
+   ```bash
+   make
+   ```
+
+3. **システムへのインストール (sudo必須)**:
+   `rsudp` ユーザーの作成、バイナリの配置、systemdサービスの登録を行います。
+   ```bash
+   sudo make install
+   ```
+
+4. **設定**:
+   ステーション情報などを編集します。
+   ```bash
+   sudo nano /etc/rsudp/rsudp.toml
+   ```
+
+### サービスの管理
+
+- **サービスの開始・自動起動有効化**:
+  ```bash
+  sudo systemctl start rsudp
+  sudo systemctl enable rsudp
+  ```
+
+- **状態確認**:
+  ```bash
+  sudo systemctl status rsudp
+  ```
+
+- **ログ確認**:
+  ```bash
+  sudo journalctl -u rsudp -f
+  ```
+
+### 使い方（手動実行）
 
 #### 1. レシーバーの起動（ライブモード）
 ```bash

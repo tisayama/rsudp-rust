@@ -1,0 +1,14 @@
+# Docker
+node_modules/
+.git/
+Dockerfile*
+.dockerignore
+*.log*
+.env*
+coverage/
+rsudp-rust/target/
+rsudp-rust/debug/
+rsudp-rust/release/
+webui/node_modules/
+webui/.next/
+rsudp-venv/

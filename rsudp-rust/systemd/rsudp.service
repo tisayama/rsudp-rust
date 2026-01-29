@@ -1,0 +1,26 @@
+[Unit]
+Description=rsudp-rust Seismic Monitoring Service
+After=network.target
+
+[Service]
+Type=simple
+User=rsudp
+Group=rsudp
+# Application Data
+WorkingDirectory=/var/lib/rsudp
+ExecStart=/usr/local/bin/rsudp-rust --config /etc/rsudp/rsudp.toml
+
+# Reliability
+Restart=on-failure
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/var/lib/rsudp
+
+[Install]
+WantedBy=multi-user.target
