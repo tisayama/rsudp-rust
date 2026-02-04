@@ -24,6 +24,7 @@ pub struct PlotSettings {
     pub output_dir: PathBuf,
     pub deconvolve: bool,
     pub units: String,
+    pub eq_screenshots: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -151,6 +152,7 @@ impl WebState {
                 output_dir: PathBuf::from("."),
                 deconvolve: false,
                 units: "counts".to_string(),
+                eq_screenshots: false,
             })),
             history: Arc::new(Mutex::new(AlertHistoryManager::new())),
             waveform_buffers: Arc::new(Mutex::new(HashMap::new())),
@@ -201,10 +203,10 @@ async fn handle_socket(socket: axum::extract::ws::WebSocket, state: WebState) {
     let mut rx = state.subscribe();
 
     while let Ok(msg) = rx.recv().await {
-        if let Ok(json) = serde_json::to_string(&msg)
-            && sender.send(Message::Text(json)).await.is_err()
-        {
-            break;
+        if let Ok(json) = serde_json::to_string(&msg) {
+            if sender.send(Message::Text(json)).await.is_err() {
+                break;
+            }
         }
     }
 }

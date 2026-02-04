@@ -42,6 +42,8 @@ Auto-generated from all feature plans. Last updated: 2025-12-19
 - local filesystem (temporary PNGs), Amazon S3 (public image hosting). (023-sns-posting)
 - Rust 1.7x (Edition 2024) + None (Standard Library + internal logic) (024-sta-lta-fix)
 - Log files in `logs/` directory. (026-rsudp-test-run)
+- Rust 1.7x, Node.js 22, Docker, Docker Compose + `cargo`, `npm`, `docker`, `docker compose` (030-add-docker-support)
+- Docker Volumes (for config, logs, and data persistence) (030-add-docker-support)
 
 - Rust 1.7x (latest stable) + None (requires Rust toolchain: `rustc`, `cargo`) (001-init-rust-project)
 
@@ -61,6 +63,7 @@ cargo test [ONLY COMMANDS FOR ACTIVE TECHNOLOGIES][ONLY COMMANDS FOR ACTIVE TECH
 Rust 1.7x (latest stable): Follow standard conventions
 
 ## Recent Changes
+- 030-add-docker-support: Added Rust 1.7x, Node.js 22, Docker, Docker Compose + `cargo`, `npm`, `docker`, `docker compose`
 - 027-rsudp-realtime-test: Achieved full STA/LTA logic parity with rsudp/ObsPy. Implemented Slice Mode with Direct Form II Transposed filter and Zero-forced Warmup (45s).
 - 026-rsudp-test-run: Added Log files in `logs/` directory.
 

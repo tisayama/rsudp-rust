@@ -65,35 +65,36 @@ pub fn parse_any(data: &[u8]) -> Result<Vec<TraceSegment>, Box<dyn std::error::E
     }
 
     // Try JSON first if it starts with '['
-    if data.starts_with(b"[")
-        && let Ok(values) = serde_json::from_slice::<Vec<serde_json::Value>>(data)
-        && values.len() >= 3
-    {
-        let channel = values[0].as_str().unwrap_or("UNK").to_string();
-        let timestamp = values[1].as_f64().unwrap_or(0.0);
-        let starttime = Utc
-            .timestamp_opt(
-                timestamp as i64,
-                ((timestamp % 1.0) * 1_000_000_000.0) as u32,
-            )
-            .unwrap();
+    if data.starts_with(b"[") {
+        if let Ok(values) = serde_json::from_slice::<Vec<serde_json::Value>>(data) {
+            if values.len() >= 3 {
+                let channel = values[0].as_str().unwrap_or("UNK").to_string();
+                let timestamp = values[1].as_f64().unwrap_or(0.0);
+                let starttime = Utc
+                    .timestamp_opt(
+                        timestamp as i64,
+                        ((timestamp % 1.0) * 1_000_000_000.0) as u32,
+                    )
+                    .unwrap();
 
-        let mut samples = Vec::new();
-        for val in values.iter().skip(2) {
-            if let Some(s) = val.as_f64() {
-                samples.push(s);
+                let mut samples = Vec::new();
+                for val in values.iter().skip(2) {
+                    if let Some(s) = val.as_f64() {
+                        samples.push(s);
+                    }
+                }
+
+                return Ok(vec![TraceSegment {
+                    network: "XX".to_string(),
+                    station: "SIM".to_string(),
+                    location: "00".to_string(),
+                    channel,
+                    starttime,
+                    samples,
+                    sampling_rate: 100.0, // Assuming 100Hz for rsudp
+                }]);
             }
         }
-
-        return Ok(vec![TraceSegment {
-            network: "XX".to_string(),
-            station: "SIM".to_string(),
-            location: "00".to_string(),
-            channel,
-            starttime,
-            samples,
-            sampling_rate: 100.0, // Assuming 100Hz for rsudp
-        }]);
     }
 
     // Fallback to MiniSEED

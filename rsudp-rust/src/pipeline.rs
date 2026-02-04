@@ -136,13 +136,17 @@ pub async fn run_pipeline(
                                     (data, common_start_time)
                                 };
                                 let out_dir = plot_settings.output_dir.clone();
-                                let snapshot_path = match crate::web::alerts::generate_snapshot(alert_id, &alert_sta, &trimmed_data, actual_start_time, sens_opt, max_int, &out_dir) {
-                                    Ok(path) => {
-                                        let mut history = shared_state.history.lock().unwrap();
-                                        history.set_snapshot_path(alert_id, path.clone());
-                                        Some(path)
-                                    },
-                                    Err(e) => { warn!("Failed to generate snapshot: {}", e); None }
+                                let snapshot_path = if plot_settings.eq_screenshots {
+                                    match crate::web::alerts::generate_snapshot(alert_id, &alert_sta, &trimmed_data, actual_start_time, sens_opt, max_int, &out_dir) {
+                                        Ok(path) => {
+                                            let mut history = shared_state.history.lock().unwrap();
+                                            history.set_snapshot_path(alert_id, path.clone());
+                                            Some(path)
+                                        },
+                                        Err(e) => { warn!("Failed to generate snapshot: {}", e); None }
+                                    }
+                                } else {
+                                    None
                                 };
                                 if let Err(e) = crate::web::alerts::send_reset_email(&t_settings_reset, &alert_ch, trigger_time, Utc::now(), max_int, snapshot_path.as_ref().map(|p| format!("http://localhost:8080/images/alerts/{}", p)).as_deref(), &intensity_message) { warn!("Failed to send reset email: {}", e); }
                                 if let Some(sns) = sns_for_reset.clone() {

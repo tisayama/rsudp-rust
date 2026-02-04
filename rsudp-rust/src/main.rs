@@ -155,7 +155,7 @@ async fn main() {
     };
 
     tracing::info!("Using metadata for Station: {}.{}", net, sta);
-    let sens_map = match fetch_sensitivity(&net, &sta) {
+    let sens_map = match fetch_sensitivity(&net, &sta).await {
         Ok(map) => map,
         Err(e) => {
             tracing::warn!("Could not fetch StationXML from FDSN: {}. Using default Raspberry Shake sensitivities.", e);

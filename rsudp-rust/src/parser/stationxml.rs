@@ -1,13 +1,17 @@
 use std::collections::HashMap;
-use std::process::Command;
 use tracing::{info, warn};
+use reqwest::Client;
 
-pub fn fetch_sensitivity(net: &str, sta: &str) -> Result<HashMap<String, f64>, Box<dyn std::error::Error>> {
+pub async fn fetch_sensitivity(net: &str, sta: &str) -> Result<HashMap<String, f64>, Box<dyn std::error::Error>> {
     let servers = [
         "https://data.raspberryshake.org/fdsnws/station/1/query",
         "https://service.iris.edu/fdsnws/station/1/query",
     ];
     
+    let client = Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()?;
+
     for server in servers {
         // Raspberry Shake uses 'station=' instead of standard 'sta=' in some contexts, 
         // though standard FDSN allows 'sta'. We try both or handle it.
@@ -20,22 +24,27 @@ pub fn fetch_sensitivity(net: &str, sta: &str) -> Result<HashMap<String, f64>, B
         
         info!("Fetching StationXML from: {}", url);
         
-        let output = match Command::new("curl")
-            .args(["-s", "-L", "-m", "15", &url])
-            .output() {
-                Ok(o) => o,
-                Err(e) => {
-                    warn!("curl execution failed for {}: {}", server, e);
-                    continue;
-                }
-            };
+        let response = match client.get(&url).send().await {
+            Ok(resp) => resp,
+            Err(e) => {
+                warn!("Request failed for {}: {}", server, e);
+                continue;
+            }
+        };
             
-        if !output.status.success() {
-            warn!("Server {} returned status {}", server, output.status);
+        if !response.status().is_success() {
+            warn!("Server {} returned status {}", server, response.status());
             continue;
         }
         
-        let xml_text = String::from_utf8_lossy(&output.stdout);
+        let xml_text = match response.text().await {
+            Ok(t) => t,
+            Err(e) => {
+                warn!("Failed to read response text from {}: {}", server, e);
+                continue;
+            }
+        };
+
         if xml_text.is_empty() || xml_text.contains("No results") || xml_text.contains("404 Not Found") {
             warn!("Server {} returned no data for {}.{}", server, net, sta);
             continue;

@@ -1,0 +1,41 @@
+services:
+  rsudp-rust:
+    build:
+      context: ./rsudp-rust
+      dockerfile: Dockerfile
+    container_name: rsudp-rust
+    ports:
+      - "${RSUDP_PORT:-8888}:8888/udp"
+      # Expose internal API/Websocket port if needed for host access, though frontend talks via internal network
+      - "${RSUDP_API_PORT:-8081}:8081" 
+    environment:
+      - RUST_LOG=info
+    restart: on-failure
+    volumes:
+      - ./rsudp.toml:/etc/rsudp/rsudp.toml:ro
+      - ./output:/var/lib/rsudp
+    networks:
+      - rsudp-net
+
+  webui:
+    build:
+      context: ./webui
+      dockerfile: Dockerfile
+    container_name: rsudp-webui
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    environment:
+      # Use service name for backend URL
+      - BACKEND_URL=http://rsudp-rust:8081
+    restart: on-failure
+    volumes:
+       - nextjs_cache:/app/.next/cache
+    networks:
+      - rsudp-net
+
+volumes:
+  nextjs_cache:
+
+networks:
+  rsudp-net:
+    driver: bridge
