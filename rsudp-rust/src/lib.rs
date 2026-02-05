@@ -1,3 +1,4 @@
+pub mod hue;
 pub mod intensity;
 pub mod parser;
 pub mod pipeline;

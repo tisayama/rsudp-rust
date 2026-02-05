@@ -1,4 +1,5 @@
 use rsudp_rust::pipeline::run_pipeline;
+use rsudp_rust::hue::HueIntegration;
 use rsudp_rust::trigger::TriggerConfig;
 use rsudp_rust::intensity::IntensityConfig;
 use rsudp_rust::web::WebState;
@@ -96,6 +97,10 @@ async fn main() {
         }
     };
     
+    // Initialize Hue Integration
+    let hue_integration = HueIntegration::new(settings.hue.clone());
+    hue_integration.start().await; // Starts discovery loop
+
     tracing::info!("LOADED CONFIG: threshold={}, reset={}, port={}", settings.alert.threshold, settings.alert.reset, settings.settings.port);
 
     // 3. Override Settings with CLI Args
@@ -137,7 +142,7 @@ async fn main() {
     let app_state = web_state.clone();
     tokio::spawn(async move {
         let router = rsudp_rust::web::routes::create_router(app_state).await;
-        let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
+        let listener = tokio::net::TcpListener::bind(&addr).await.expect("Failed to bind WebUI port - is rsudp already running?");
         tracing::info!("WebUI server listening on {}", addr);
         axum::serve(listener, router).await.unwrap();
     });
@@ -205,12 +210,14 @@ async fn main() {
     // 5. Simulation or Live UDP mode
     let sm = sens_map.clone();
     let sns = Some(sns_manager.clone());
+    let hue = Some(hue_integration.clone());
     if let Some(path) = args.file {
         tracing::info!("Simulation mode: processing file {}", path);
         let ws = web_state.clone();
         let sns_sim = sns.clone();
+        let hue_sim = hue.clone();
         let pipeline_handle = tokio::spawn(async move {
-            run_pipeline(pipe_rx, trigger_config, intensity_config, ws, sm, sns_sim).await;
+            run_pipeline(pipe_rx, trigger_config, intensity_config, ws, sm, sns_sim, hue_sim).await;
         });
 
         let bytes = std::fs::read(&path).unwrap();
@@ -226,8 +233,9 @@ async fn main() {
         // LIVE UDP MODE
         let ws = web_state.clone();
         let sns_live = sns.clone();
+        let hue_live = hue.clone();
         tokio::spawn(async move {
-            run_pipeline(pipe_rx, trigger_config, intensity_config, ws, sm, sns_live).await;
+            run_pipeline(pipe_rx, trigger_config, intensity_config, ws, sm, sns_live, hue_live).await;
         });
 
         let (recv_tx, mut recv_rx) = mpsc::channel(100);

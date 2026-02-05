@@ -44,3 +44,26 @@ For manual installation and build instructions, please refer to the README files
 
 ## License
 Refer to the individual components for licensing information.
+
+## Philips Hue Integration
+
+This project supports Philips Hue (API v2) for visual alerts.
+
+### Setup
+1. Run the setup tool to pair with your Hue Bridge:
+   ```bash
+   cargo run --bin rsudp-hue -- setup
+   ```
+2. Press the Link Button on your bridge when prompted.
+3. Copy the generated `App Key`.
+4. List available lights to find target IDs:
+   ```bash
+   cargo run --bin rsudp-hue -- list --ip <BRIDGE_IP> --key <APP_KEY>
+   ```
+5. Add the configuration to your `rsudp.toml`:
+   ```toml
+   [HUE]
+   enabled = true
+   app_key = "YOUR_APP_KEY"
+   target_ids = ["uuid-1", "uuid-2"]
+   ```

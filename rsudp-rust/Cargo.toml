@@ -30,6 +30,7 @@ uuid = { version = "1.0", features = ["v4", "serde"] }
 colorous = "1.0"
 async-trait = "0.1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "rustls-tls"] }
+mdns-sd = "0.13"
 aws-config = { version = "1.1", default-features = false, features = ["rustls"] }
 aws-sdk-s3 = { version = "1.1", default-features = false, features = ["rustls", "rt-tokio"] }
 aws-sdk-sns = { version = "1.1", default-features = false, features = ["rustls", "rt-tokio"] }

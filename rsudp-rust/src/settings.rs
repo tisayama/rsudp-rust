@@ -1,3 +1,4 @@
+use crate::hue::config::HueConfig;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use config::{Config, ConfigError, Environment, File};
@@ -38,6 +39,8 @@ pub struct Settings {
     pub bluesky: BlueSkySettings,
     #[serde(alias = "RSAM")]
     pub rsam: RsamSettings,
+    #[serde(alias = "HUE")]
+    pub hue: HueConfig,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -601,7 +604,7 @@ impl Settings {
         // T009: Detect unknown fields
         if let Ok(table) = config.clone().try_deserialize::<serde_json::Value>() {
             if let Some(map) = table.as_object() {
-                let known_sections = ["settings", "printdata", "write", "plot", "forward", "alert", "alertsound", "custom", "tweets", "telegram", "googlechat", "discord", "sns", "line", "bluesky", "rsam"];
+                let known_sections = ["settings", "printdata", "write", "plot", "forward", "alert", "alertsound", "custom", "tweets", "telegram", "googlechat", "discord", "sns", "line", "bluesky", "rsam", "hue"];
                 for key in map.keys() {
                     let lower_key = key.to_lowercase();
                     if !known_sections.contains(&lower_key.as_str()) {

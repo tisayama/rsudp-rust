@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 use chrono::Utc;
 
 use crate::web::sns::{SNSManager, NotificationEvent};
+use crate::hue::HueIntegration;
 use std::sync::Arc;
 
 pub async fn run_pipeline(
@@ -20,6 +21,7 @@ pub async fn run_pipeline(
     web_state: WebState,
     sensitivity_map: HashMap<String, f64>,
     sns_manager: Option<Arc<SNSManager>>,
+    hue_integration: Option<HueIntegration>,
 ) {
     info!("Pipeline started");
     let mut tm = TriggerManager::new(trigger_config);
@@ -33,6 +35,7 @@ pub async fn run_pipeline(
     let mut max_intensity_window: f64 = -9.9;
 
     while let Some(data) = receiver.recv().await {
+        let hue_iter = hue_integration.clone();
         let segments = match parse_any(&data) {
             Ok(s) => s,
             Err(e) => {
@@ -87,6 +90,14 @@ pub async fn run_pipeline(
                                     event_type: AlertEventType::Trigger, timestamp: alert.timestamp, station_id: format!("{}.{}", segment.network, segment.station), channel: segment.channel.clone(), max_ratio: alert.ratio, max_intensity: 0.0, snapshot_path: None,
                                 };
                                 tokio::spawn(async move { sns.notify_trigger(&event).await; });
+                            }
+
+                            // Hue Alert Trigger
+                            if let Some(hue) = &hue_iter {
+                                let hue_clone = hue.clone();
+                                tokio::spawn(async move {
+                                    hue_clone.trigger_alert().await;
+                                });
                             }
                             
                             let plot_settings = web_state.settings.read().unwrap().clone();
@@ -155,6 +166,7 @@ pub async fn run_pipeline(
                                     };
                                     tokio::spawn(async move { sns.notify_reset(&event).await; });
                                 }
+
                                 {
                                     let mut history = shared_state.history.lock().unwrap();
                                     history.reset_event(alert_id, Utc::now(), max_int, intensity_message.clone());
@@ -171,6 +183,14 @@ pub async fn run_pipeline(
                                 };
                                 let shindo = crate::intensity::get_shindo_class(max_int);
                                 info!("{} | Max Intensity: {:.2} (JMA: {})", alert, max_int, shindo);
+
+                                // Hue Alert Reset
+                                if let Some(hue) = &hue_iter {
+                                    let hue_clone = hue.clone();
+                                    tokio::spawn(async move {
+                                        hue_clone.reset_alert(max_int).await;
+                                    });
+                                }
                             }
                         },
                         AlertEventType::Status => {
