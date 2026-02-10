@@ -14,6 +14,7 @@ use crate::web::sns::{SNSManager, NotificationEvent};
 use crate::hue::HueIntegration;
 use crate::sound::AudioController;
 use crate::settings::AlertSoundSettings;
+use crate::forward::ForwardManager;
 use std::sync::Arc;
 
 pub async fn run_pipeline(
@@ -26,6 +27,7 @@ pub async fn run_pipeline(
     hue_integration: Option<HueIntegration>,
     audio_controller: Option<AudioController>,
     alert_sound_settings: AlertSoundSettings,
+    forward_manager: Option<Arc<ForwardManager>>,
 ) {
     info!("Pipeline started");
     let mut tm = TriggerManager::new(trigger_config);
@@ -50,6 +52,13 @@ pub async fn run_pipeline(
                 continue;
             }
         };
+
+        // --- FORWARD DATA ---
+        if let Some(fwd) = &forward_manager {
+            for seg in &segments {
+                fwd.forward_data(&seg.channel, &data);
+            }
+        }
 
         for segment in segments {
             {
@@ -97,6 +106,11 @@ pub async fn run_pipeline(
                                     event_type: AlertEventType::Trigger, timestamp: alert.timestamp, station_id: format!("{}.{}", segment.network, segment.station), channel: segment.channel.clone(), max_ratio: alert.ratio, max_intensity: 0.0, snapshot_path: None,
                                 };
                                 tokio::spawn(async move { sns.notify_trigger(&event).await; });
+                            }
+
+                            // Forward ALARM message
+                            if let Some(fwd) = &forward_manager {
+                                fwd.forward_alarm(&format!("ALARM {} {}", segment.channel, alert.timestamp.to_rfc3339()));
                             }
 
                             // Hue Alert Trigger
@@ -201,6 +215,11 @@ pub async fn run_pipeline(
                                 };
                                 let shindo = crate::intensity::get_shindo_class(max_int);
                                 info!("{} | Max Intensity: {:.2} (JMA: {})", alert, max_int, shindo);
+
+                                // Forward RESET message
+                                if let Some(fwd) = &forward_manager {
+                                    fwd.forward_alarm(&format!("RESET {} {}", alert.channel, alert.timestamp.to_rfc3339()));
+                                }
 
                                 // Hue Alert Reset
                                 if let Some(hue) = &hue_iter {

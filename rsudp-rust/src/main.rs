@@ -13,6 +13,7 @@ use clap::Parser;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use rsudp_rust::forward::ForwardManager;
 use rsudp_rust::web::sns::SNSManager;
 use std::sync::Arc;
 
@@ -232,7 +233,20 @@ async fn main() {
     // 4. Initialize SNS Manager
     let sns_manager = Arc::new(SNSManager::from_settings(&settings).await);
 
-    // 5. Simulation or Live UDP mode
+    // 5. Initialize Forward Manager
+    let forward_manager = if settings.forward.enabled {
+        match ForwardManager::new(&settings.forward).await {
+            Ok(fm) => Some(Arc::new(fm)),
+            Err(e) => {
+                tracing::error!("Forward configuration error: {}", e);
+                std::process::exit(1);
+            }
+        }
+    } else {
+        None
+    };
+
+    // 6. Simulation or Live UDP mode
     let sm = sens_map.clone();
     let sns = Some(sns_manager.clone());
     let hue = Some(hue_integration.clone());
@@ -245,8 +259,9 @@ async fn main() {
         let hue_sim = hue.clone();
         let audio_sim = audio.clone();
         let sound_sim = sound_settings.clone();
+        let fwd_sim = forward_manager.clone();
         let pipeline_handle = tokio::spawn(async move {
-            run_pipeline(pipe_rx, trigger_config, intensity_config, ws, sm, sns_sim, hue_sim, audio_sim, sound_sim).await;
+            run_pipeline(pipe_rx, trigger_config, intensity_config, ws, sm, sns_sim, hue_sim, audio_sim, sound_sim, fwd_sim).await;
         });
 
         let bytes = std::fs::read(&path).unwrap();
@@ -265,8 +280,9 @@ async fn main() {
         let hue_live = hue.clone();
         let audio_live = audio.clone();
         let sound_live = sound_settings.clone();
+        let fwd_live = forward_manager.clone();
         tokio::spawn(async move {
-            run_pipeline(pipe_rx, trigger_config, intensity_config, ws, sm, sns_live, hue_live, audio_live, sound_live).await;
+            run_pipeline(pipe_rx, trigger_config, intensity_config, ws, sm, sns_live, hue_live, audio_live, sound_live, fwd_live).await;
         });
 
         let (recv_tx, mut recv_rx) = mpsc::channel(100);
