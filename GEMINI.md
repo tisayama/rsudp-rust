@@ -46,6 +46,8 @@ Auto-generated from all feature plans. Last updated: 2025-12-19
 - Docker Volumes (for config, logs, and data persistence) (030-add-docker-support)
 - Rust 1.7x (Edition 2021) + `tokio`, `reqwest`, `serde`, `clap`. + `mdns-sd` (for discovery), `reqwest` (for API v2/HTTPS), `clap` (for CLI). (031-hue-v2-integration)
 - `rsudp.toml` (plain text `app_key` and config). (031-hue-v2-integration)
+- Rust 1.7x (Edition 2021) + `tokio`, `rodio`, `serde`, `config`. + `rodio` (for audio), `tokio::task::spawn_blocking`. (032-alert-audio-playback)
+- `rsudp.toml` (configuration for file paths). (032-alert-audio-playback)
 
 - Rust 1.7x (latest stable) + None (requires Rust toolchain: `rustc`, `cargo`) (001-init-rust-project)
 
@@ -65,9 +67,9 @@ cargo test [ONLY COMMANDS FOR ACTIVE TECHNOLOGIES][ONLY COMMANDS FOR ACTIVE TECH
 Rust 1.7x (latest stable): Follow standard conventions
 
 ## Recent Changes
+- 032-alert-audio-playback: Added Rust 1.7x (Edition 2021) + `tokio`, `rodio`, `serde`, `config`. + `rodio` (for audio), `tokio::task::spawn_blocking`.
 - 031-hue-v2-integration: Added Rust 1.7x (Edition 2021) + `tokio`, `reqwest`, `serde`, `clap`. + `mdns-sd` (for discovery), `reqwest` (for API v2/HTTPS), `clap` (for CLI).
 - 030-add-docker-support: Added Rust 1.7x, Node.js 22, Docker, Docker Compose + `cargo`, `npm`, `docker`, `docker compose`
-- 027-rsudp-realtime-test: Achieved full STA/LTA logic parity with rsudp/ObsPy. Implemented Slice Mode with Direct Form II Transposed filter and Zero-forced Warmup (45s).
 
 
 <!-- MANUAL ADDITIONS START -->
