@@ -12,8 +12,6 @@ use chrono::Utc;
 
 use crate::web::sns::{SNSManager, NotificationEvent};
 use crate::hue::HueIntegration;
-use crate::sound::AudioController;
-use crate::settings::AlertSoundSettings;
 use std::sync::Arc;
 
 pub async fn run_pipeline(
@@ -24,8 +22,6 @@ pub async fn run_pipeline(
     sensitivity_map: HashMap<String, f64>,
     sns_manager: Option<Arc<SNSManager>>,
     hue_integration: Option<HueIntegration>,
-    audio_controller: Option<AudioController>,
-    alert_sound_settings: AlertSoundSettings,
 ) {
     info!("Pipeline started");
     let mut tm = TriggerManager::new(trigger_config);
@@ -39,10 +35,7 @@ pub async fn run_pipeline(
     let mut max_intensity_window: f64 = -9.9;
 
     while let Some(data) = receiver.recv().await {
-        // Clone for use in this iteration
         let hue_iter = hue_integration.clone();
-        let audio_iter = audio_controller.clone();
-        
         let segments = match parse_any(&data) {
             Ok(s) => s,
             Err(e) => {
@@ -105,17 +98,6 @@ pub async fn run_pipeline(
                                 tokio::spawn(async move {
                                     hue_clone.trigger_alert().await;
                                 });
-                            }
-
-                            // Audio Alert Trigger
-                            if let Some(audio) = &audio_iter {
-                                let audio_clone = audio.clone();
-                                let file_path = alert_sound_settings.trigger_file.clone();
-                                if !file_path.is_empty() {
-                                    tokio::task::spawn_blocking(move || {
-                                        audio_clone.play_file(&file_path);
-                                    });
-                                }
                             }
                             
                             let plot_settings = web_state.settings.read().unwrap().clone();
@@ -207,27 +189,6 @@ pub async fn run_pipeline(
                                     let hue_clone = hue.clone();
                                     tokio::spawn(async move {
                                         hue_clone.reset_alert(max_int).await;
-                                    });
-                                }
-
-                                // Audio Alert Reset
-                                if let Some(audio) = &audio_iter {
-                                    let audio_clone = audio.clone();
-                                    // Use captured settings for reset sound mapping
-                                    let sound_settings = alert_sound_settings.clone(); 
-                                    let intensity_str = shindo.to_string();
-                                    
-                                    tokio::task::spawn_blocking(move || {
-                                        let file_path = sound_settings.intensity_files
-                                            .get(&intensity_str)
-                                            .cloned()
-                                            .unwrap_or(sound_settings.default_reset_file.clone());
-                                        
-                                        if !file_path.is_empty() {
-                                            audio_clone.play_file(&file_path);
-                                        } else {
-                                            warn!("No audio file found for intensity {} and no default configured", intensity_str);
-                                        }
                                     });
                                 }
                             }

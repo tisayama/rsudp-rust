@@ -1,6 +1,5 @@
 pub mod hue;
 pub mod intensity;
-pub mod sound;
 pub mod parser;
 pub mod pipeline;
 pub mod receiver;

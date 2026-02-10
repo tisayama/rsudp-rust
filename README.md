@@ -62,44 +62,8 @@ This project supports Philips Hue (API v2) for visual alerts.
    ```
 5. Add the configuration to your `rsudp.toml`:
    ```toml
-   ```toml
    [HUE]
    enabled = true
    app_key = "YOUR_APP_KEY"
    target_ids = ["uuid-1", "uuid-2"]
    ```
-
-## Audio Playback
-
-This project supports server-side audio playback for alerts using `rodio`.
-
-### Prerequisites (Linux)
-Install ALSA development headers if building from source:
-```bash
-sudo apt-get install libasound2-dev
-```
-
-### Configuration
-Enable audio and map sound files in `rsudp.toml`. Supported formats are **MP3** and **WAV**.
-
-```toml
-[ALERTSOUND]
-enabled = true
-trigger_file = "/home/pi/sounds/siren.mp3"
-default_reset_file = "/home/pi/sounds/info.mp3"
-
-[ALERTSOUND.intensity_files]
-"0" = "/home/pi/sounds/shindo0.mp3"
-"1" = "/home/pi/sounds/shindo1.mp3"
-"2" = "/home/pi/sounds/shindo2.mp3"
-"3" = "/home/pi/sounds/shindo3.mp3"
-"4" = "/home/pi/sounds/shindo4.mp3"
-"5-" = "/home/pi/sounds/shindo5m.mp3"
-"5+" = "/home/pi/sounds/shindo5p.mp3"
-"6-" = "/home/pi/sounds/shindo6m.mp3"
-"6+" = "/home/pi/sounds/shindo6p.mp3"
-"7" = "/home/pi/sounds/shindo7.mp3"
-```
-
-The system will play the sound corresponding to the maximum JMA intensity when the alert resets. If a specific intensity key is not found, the `default_reset_file` is used as a fallback.
-

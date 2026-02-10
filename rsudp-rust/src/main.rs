@@ -1,5 +1,4 @@
 use rsudp_rust::pipeline::run_pipeline;
-use rsudp_rust::sound::AudioManager;
 use rsudp_rust::hue::HueIntegration;
 use rsudp_rust::trigger::TriggerConfig;
 use rsudp_rust::intensity::IntensityConfig;
@@ -101,20 +100,6 @@ async fn main() {
     // Initialize Hue Integration
     let hue_integration = HueIntegration::new(settings.hue.clone());
     hue_integration.start().await; // Starts discovery loop
-
-    // Initialize Audio Manager (Optional, if device exists)
-    // We must keep _audio_stream alive for the duration of the program
-    let (audio_manager, _audio_stream) = if settings.alertsound.enabled {
-        match AudioManager::new() {
-            Some((am, stream)) => (Some(Arc::new(am)), Some(stream)),
-            None => {
-                tracing::warn!("Audio playback enabled but no output device found. Sound will be disabled.");
-                (None, None)
-            }
-        }
-    } else {
-        (None, None)
-    };
 
     tracing::info!("LOADED CONFIG: threshold={}, reset={}, port={}", settings.alert.threshold, settings.alert.reset, settings.settings.port);
 
@@ -226,17 +211,13 @@ async fn main() {
     let sm = sens_map.clone();
     let sns = Some(sns_manager.clone());
     let hue = Some(hue_integration.clone());
-    let audio = audio_manager.clone();
-    let sound_settings = settings.alertsound.clone();
     if let Some(path) = args.file {
         tracing::info!("Simulation mode: processing file {}", path);
         let ws = web_state.clone();
         let sns_sim = sns.clone();
         let hue_sim = hue.clone();
-        let audio_sim = audio.clone();
-        let sound_sim = sound_settings.clone();
         let pipeline_handle = tokio::spawn(async move {
-            run_pipeline(pipe_rx, trigger_config, intensity_config, ws, sm, sns_sim, hue_sim, audio_sim, sound_sim).await;
+            run_pipeline(pipe_rx, trigger_config, intensity_config, ws, sm, sns_sim, hue_sim).await;
         });
 
         let bytes = std::fs::read(&path).unwrap();
@@ -253,10 +234,8 @@ async fn main() {
         let ws = web_state.clone();
         let sns_live = sns.clone();
         let hue_live = hue.clone();
-        let audio_live = audio.clone();
-        let sound_live = sound_settings.clone();
         tokio::spawn(async move {
-            run_pipeline(pipe_rx, trigger_config, intensity_config, ws, sm, sns_live, hue_live, audio_live, sound_live).await;
+            run_pipeline(pipe_rx, trigger_config, intensity_config, ws, sm, sns_live, hue_live).await;
         });
 
         let (recv_tx, mut recv_rx) = mpsc::channel(100);

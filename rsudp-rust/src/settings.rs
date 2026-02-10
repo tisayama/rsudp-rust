@@ -170,28 +170,8 @@ pub struct AlertSettings {
 pub struct AlertSoundSettings {
     #[serde(alias = "ENABLED")]
     pub enabled: bool,
-    #[serde(alias = "TRIGGER_FILE")]
-    pub trigger_file: String,
-    #[serde(alias = "DEFAULT_RESET_FILE")]
-    pub default_reset_file: String,
-    #[serde(alias = "INTENSITY_FILES")]
-    pub intensity_files: std::collections::BTreeMap<String, String>,
-}
-
-impl Default for AlertSoundSettings {
-    fn default() -> Self {
-        let mut intensity_files = std::collections::BTreeMap::new();
-        for key in ["0", "1", "2", "3", "4", "5-", "5+", "6-", "6+", "7"] {
-            intensity_files.insert(key.to_string(), "".to_string());
-        }
-        
-        Self {
-            enabled: false,
-            trigger_file: "".to_string(),
-            default_reset_file: "".to_string(),
-            intensity_files,
-        }
-    }
+    #[serde(alias = "MP3FILE")]
+    pub mp3file: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -445,6 +425,15 @@ impl Default for AlertSettings {
             on_plot: false,
             on_plot_end_line_color: "#D72638".to_string(),
             on_plot_start_line_color: "#4C8BF5".to_string(),
+        }
+    }
+}
+
+impl Default for AlertSoundSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            mp3file: "doorbell".to_string(),
         }
     }
 }
