@@ -1,0 +1,18 @@
+[settings]
+port = 9999
+station = "TEST99"
+
+[alert]
+enabled = true
+threshold = 2.5
+
+[alertsound]
+enabled = true
+trigger_file = "/tmp/trigger.mp3"
+default_reset_file = "/tmp/reset.mp3"
+intensity_files = { "1" = "/tmp/1.mp3", "5+" = "/tmp/5p.mp3" }
+
+[hue]
+enabled = false
+app_key = ""
+target_ids = []

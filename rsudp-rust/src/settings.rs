@@ -180,10 +180,8 @@ pub struct AlertSoundSettings {
 
 impl Default for AlertSoundSettings {
     fn default() -> Self {
-        let mut intensity_files = std::collections::BTreeMap::new();
-        for key in ["0", "1", "2", "3", "4", "5-", "5+", "6-", "6+", "7"] {
-            intensity_files.insert(key.to_string(), "".to_string());
-        }
+        // Empty map for default to avoid config crate parsing issues with keys like "5+" during default loading
+        let intensity_files = std::collections::BTreeMap::new();
         
         Self {
             enabled: false,

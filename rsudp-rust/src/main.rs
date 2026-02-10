@@ -71,7 +71,17 @@ async fn main() {
 
     // 1. Handle Config Dumping
     if let Some(dump_path) = args.dump_config {
-        let default_settings = Settings::default();
+        let mut default_settings = Settings::default();
+        
+        // Manually populate intensity keys for dump output
+        // We do this here instead of in Default implementation to avoid
+        // config crate parsing errors (Char error) when loading defaults
+        let mut intensity_files = std::collections::BTreeMap::new();
+        for key in ["0", "1", "2", "3", "4", "5-", "5+", "6-", "6+", "7"] {
+            intensity_files.insert(key.to_string(), "".to_string());
+        }
+        default_settings.alertsound.intensity_files = intensity_files;
+
         let format = dump_path.extension().and_then(|e| e.to_str()).unwrap_or("toml");
         match default_settings.dump(format) {
             Ok(content) => {
