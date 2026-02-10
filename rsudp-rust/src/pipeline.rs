@@ -15,6 +15,7 @@ use crate::hue::HueIntegration;
 use crate::sound::AudioController;
 use crate::settings::AlertSoundSettings;
 use crate::forward::ForwardManager;
+use crate::rsam::RsamManager;
 use std::sync::Arc;
 
 pub async fn run_pipeline(
@@ -28,6 +29,7 @@ pub async fn run_pipeline(
     audio_controller: Option<AudioController>,
     alert_sound_settings: AlertSoundSettings,
     forward_manager: Option<Arc<ForwardManager>>,
+    mut rsam_manager: Option<RsamManager>,
 ) {
     info!("Pipeline started");
     let mut tm = TriggerManager::new(trigger_config);
@@ -57,6 +59,13 @@ pub async fn run_pipeline(
         if let Some(fwd) = &forward_manager {
             for seg in &segments {
                 fwd.forward_data(&seg.channel, &data);
+            }
+        }
+
+        // --- RSAM ---
+        if let Some(rsam) = &mut rsam_manager {
+            for seg in &segments {
+                rsam.process_segment(seg);
             }
         }
 
