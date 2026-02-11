@@ -11,6 +11,10 @@ export interface PlotSettings {
   auto_scale: boolean;
   theme: 'dark' | 'light';
   save_pct: number;
+  show_spectrogram: boolean;
+  spectrogram_freq_min: number;
+  spectrogram_freq_max: number;
+  spectrogram_log_y: boolean;
 }
 
 export type AlertEventType = 'Alarm' | 'Reset';
@@ -49,9 +53,34 @@ export interface AlertSettings {
   save_pct: number;
 }
 
-export type WsMessage = 
+export interface SpectrogramColumn {
+  data: Uint8Array;
+  timestamp: number; // microseconds since epoch
+  frequencyBins: number;
+}
+
+export interface SpectrogramPacket {
+  channelId: string;
+  timestamp: number; // microseconds since epoch
+  sampleRate: number;
+  frequencyBins: number;
+  columnsCount: number;
+  columns: Uint8Array[];
+}
+
+export interface IntensityIndicatorState {
+  visible: boolean;
+  maxIntensity: number;
+  maxClass: string;
+  triggerTime: Date | null;
+  resetTime: Date | null;
+  fadeoutTimer: ReturnType<typeof setTimeout> | null;
+}
+
+export type WsMessage =
   | { type: 'Waveform', data: WaveformPacket }
   | { type: 'Alert', data: { timestamp: string, channel: string, message: string } }
   | { type: 'Intensity', data: IntensityResult }
   | { type: 'AlertStart', data: { id: string, channel: string, timestamp: string } }
-  | { type: 'AlertEnd', data: { id: string, channel: string, timestamp: string, max_ratio: number, message: string } };
+  | { type: 'AlertEnd', data: { id: string, channel: string, timestamp: string, max_ratio: number, message: string } }
+  | { type: 'BackfillComplete', data: { channels: string[] } };

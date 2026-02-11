@@ -164,7 +164,7 @@ async fn main() {
     let (pipe_tx, pipe_rx) = mpsc::channel(100);
 
     // 1. Start Web Server
-    let web_port = args.web_port.unwrap_or(8081); // Default to 8081 if not specified
+    let web_port = args.web_port.unwrap_or(8080); // Default to 8080 if not specified
     let addr = format!("0.0.0.0:{}", web_port);
     let app_state = web_state.clone();
     tokio::spawn(async move {

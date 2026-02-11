@@ -12,18 +12,18 @@ interface ControlPanelProps {
 const ControlPanel: React.FC<ControlPanelProps> = ({ settings, onSettingsChange, availableChannels }) => {
   const toggleChannel = (channel: string) => {
     const active = settings.active_channels.includes(channel);
-    const next = active 
+    const next = active
       ? settings.active_channels.filter(c => c !== channel)
       : [...settings.active_channels, channel];
     onSettingsChange({ ...settings, active_channels: next });
   };
 
   return (
-    <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-      <h2 className="text-xl font-bold mb-4 text-gray-800">Settings</h2>
-      
+    <div className="bg-[#2a2f3d] p-6 rounded-xl border border-gray-700">
+      <h2 className="text-xl font-bold mb-4 text-gray-300">Settings</h2>
+
       <div className="mb-6">
-        <label className="block text-sm font-semibold text-gray-700 mb-2">Channels</label>
+        <label className="block text-sm font-semibold text-gray-400 mb-2">Channels</label>
         <div className="flex flex-wrap gap-2">
           {availableChannels.map(channel => (
             <button
@@ -32,7 +32,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({ settings, onSettingsChange,
               className={`px-3 py-1.5 rounded-full text-xs font-bold transition-colors ${
                 settings.active_channels.includes(channel)
                   ? 'bg-blue-600 text-white shadow-md'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
               }`}
             >
               {channel}
@@ -42,26 +42,26 @@ const ControlPanel: React.FC<ControlPanelProps> = ({ settings, onSettingsChange,
       </div>
 
       <div className="mb-6">
-        <label className="block text-sm font-semibold text-gray-700 mb-2">
+        <label className="block text-sm font-semibold text-gray-400 mb-2">
           Time Window: {settings.window_seconds}s
         </label>
         <input
           type="range"
-          min="10"
+          min="5"
           max="300"
-          step="10"
+          step="5"
           value={settings.window_seconds}
           onChange={(e) => onSettingsChange({ ...settings, window_seconds: parseInt(e.target.value) })}
-          className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+          className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-600"
         />
       </div>
 
-      <div className="flex items-center justify-between">
-        <label className="text-sm font-semibold text-gray-700">Auto-scale</label>
+      <div className="flex items-center justify-between mb-4">
+        <label className="text-sm font-semibold text-gray-400">Auto-scale</label>
         <button
           onClick={() => onSettingsChange({ ...settings, auto_scale: !settings.auto_scale })}
           className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${
-            settings.auto_scale ? 'bg-blue-600' : 'bg-gray-200'
+            settings.auto_scale ? 'bg-blue-600' : 'bg-gray-600'
           }`}
         >
           <span
@@ -70,6 +70,77 @@ const ControlPanel: React.FC<ControlPanelProps> = ({ settings, onSettingsChange,
             }`}
           />
         </button>
+      </div>
+
+      {/* Spectrogram Controls */}
+      <div className="border-t border-gray-700 pt-4 mt-4">
+        <h3 className="text-sm font-bold text-gray-300 mb-3">Spectrogram</h3>
+
+        <div className="flex items-center justify-between mb-4">
+          <label className="text-sm font-semibold text-gray-400">Show Spectrogram</label>
+          <button
+            onClick={() => onSettingsChange({ ...settings, show_spectrogram: !settings.show_spectrogram })}
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${
+              settings.show_spectrogram ? 'bg-blue-600' : 'bg-gray-600'
+            }`}
+          >
+            <span
+              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                settings.show_spectrogram ? 'translate-x-6' : 'translate-x-1'
+              }`}
+            />
+          </button>
+        </div>
+
+        {settings.show_spectrogram && (
+          <>
+            <div className="mb-4">
+              <label className="block text-xs font-semibold text-gray-400 mb-1">
+                Freq Min: {settings.spectrogram_freq_min} Hz
+              </label>
+              <input
+                type="number"
+                min="0"
+                max={settings.spectrogram_freq_max - 1}
+                step="0.5"
+                value={settings.spectrogram_freq_min}
+                onChange={(e) => onSettingsChange({ ...settings, spectrogram_freq_min: parseFloat(e.target.value) })}
+                className="w-full px-2 py-1 bg-[#202530] border border-gray-600 rounded text-gray-300 text-sm"
+              />
+            </div>
+
+            <div className="mb-4">
+              <label className="block text-xs font-semibold text-gray-400 mb-1">
+                Freq Max: {settings.spectrogram_freq_max} Hz
+              </label>
+              <input
+                type="number"
+                min={settings.spectrogram_freq_min + 1}
+                max="100"
+                step="0.5"
+                value={settings.spectrogram_freq_max}
+                onChange={(e) => onSettingsChange({ ...settings, spectrogram_freq_max: parseFloat(e.target.value) })}
+                className="w-full px-2 py-1 bg-[#202530] border border-gray-600 rounded text-gray-300 text-sm"
+              />
+            </div>
+
+            <div className="flex items-center justify-between">
+              <label className="text-sm font-semibold text-gray-400">Log Y-Axis</label>
+              <button
+                onClick={() => onSettingsChange({ ...settings, spectrogram_log_y: !settings.spectrogram_log_y })}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${
+                  settings.spectrogram_log_y ? 'bg-blue-600' : 'bg-gray-600'
+                }`}
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                    settings.spectrogram_log_y ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
