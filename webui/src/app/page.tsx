@@ -10,11 +10,10 @@ import AlertSettingsPanel from '../../components/AlertSettingsPanel';
 import PerformanceMonitor from '../../components/PerformanceMonitor';
 import IntensityBadge from '../../components/IntensityBadge';
 import { PlotSettings, VisualAlertMarker, IntensityIndicatorState } from '../../lib/types';
-import Link from 'next/link';
 import { getBackendOrigin, getWsUrl } from '../../lib/api';
 
 const DEFAULT_SETTINGS: PlotSettings = {
-  active_channels: ['SHZ', 'EHZ'],
+  active_channels: [],
   window_seconds: 90,
   auto_scale: true,
   theme: 'dark',
@@ -57,8 +56,11 @@ export default function Home() {
     fadeoutTimer: null,
   });
 
+  const [channelTimestamps, setChannelTimestamps] = useState<Record<string, Date>>({});
+
   const buffersRef = useRef<Record<string, RingBuffer>>({});
   const spectrogramRef = useRef<Record<string, SpectrogramState>>({});
+  const channelTimestampsRef = useRef<Record<string, Date>>({});
   const fadeoutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleSpectrogramData = useCallback((
@@ -105,8 +107,22 @@ export default function Home() {
 
     fetch(`${api}/api/channels`)
       .then(res => res.json())
-      .then(data => setAvailableChannels(data))
+      .then((data: string[]) => {
+        setAvailableChannels(data);
+        // Auto-populate active_channels if empty (first load)
+        setSettings(prev => {
+          if (prev.active_channels.length === 0 && data.length > 0) {
+            return { ...prev, active_channels: data };
+          }
+          return prev;
+        });
+      })
       .catch(err => console.error('Failed to fetch channels:', err));
+
+    fetch(`${api}/api/station`)
+      .then(res => res.json())
+      .then((name: string) => { if (name) setStationName(name); })
+      .catch(err => console.error('Failed to fetch station name:', err));
   }, []);
 
   const handleSettingsChange = (newSettings: PlotSettings) => {
@@ -122,19 +138,19 @@ export default function Home() {
     if (!lastMessage) return;
 
     if (lastMessage.type === 'Waveform') {
-      const { channel_id, samples, sample_rate } = lastMessage.data;
+      const { channel_id, timestamp, samples, sample_rate } = lastMessage.data;
       if (!settings.active_channels.includes(channel_id)) return;
-
-      // Derive station name from channel if not set
-      if (!stationName && channel_id.length >= 3) {
-        setStationName(channel_id);
-      }
 
       if (!buffersRef.current[channel_id]) {
         buffersRef.current[channel_id] = new RingBuffer(300 * sample_rate);
         setBuffers({ ...buffersRef.current });
       }
       buffersRef.current[channel_id].pushMany(samples);
+
+      // Track latest timestamp for absolute time axis
+      const latestTs = new Date(Date.parse(timestamp) + (samples.length / sample_rate) * 1000);
+      channelTimestampsRef.current[channel_id] = latestTs;
+      setChannelTimestamps({ ...channelTimestampsRef.current });
     } else if (lastMessage.type === 'AlertStart') {
       const { channel, timestamp } = lastMessage.data;
       setVisualAlerts(prev => [...prev, { type: 'Alarm' as const, channel, timestamp }].slice(-50));
@@ -177,7 +193,7 @@ export default function Home() {
         return prev;
       });
     }
-  }, [lastMessage, settings.active_channels, stationName]);
+  }, [lastMessage, settings.active_channels]);
 
   // Sort channels: Z first, E second, N third, others last
   const sortedChannels = [...settings.active_channels].sort((a, b) => {
@@ -243,6 +259,7 @@ export default function Home() {
                     settings={settings}
                     isBottomChannel={idx === sortedChannels.length - 1}
                     units="CHAN"
+                    latestTimestamp={channelTimestamps[id] || null}
                   />
                 );
               })
@@ -251,12 +268,6 @@ export default function Home() {
         </div>
 
         <aside className="lg:w-80 space-y-6">
-          <Link
-            href="/history"
-            className="flex items-center justify-center w-full py-3 bg-blue-600 text-white rounded-xl font-bold shadow-lg hover:bg-blue-700 transition-all hover:scale-[1.02] active:scale-95"
-          >
-            View Alert History
-          </Link>
           <ControlPanel
             settings={settings}
             onSettingsChange={handleSettingsChange}

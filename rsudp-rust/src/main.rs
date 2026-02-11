@@ -187,6 +187,10 @@ async fn main() {
     };
 
     tracing::info!("Using metadata for Station: {}.{}", net, sta);
+    {
+        let mut sn = web_state.station_name.write().unwrap();
+        *sn = sta.clone();
+    }
     let sens_map = match fetch_sensitivity(&net, &sta).await {
         Ok(map) => map,
         Err(e) => {

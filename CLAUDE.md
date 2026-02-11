@@ -54,6 +54,8 @@ Auto-generated from all feature plans. Last updated: 2025-12-19
 - In-memory sliding window buffer (Vec<f64> with time-based eviction) (035-rsam-calculation)
 - Rust 1.7x (Edition 2021) + TypeScript 5 / Next.js 14.2 (036-webui-spectrogram)
 - In-memory ring buffers (server-side `VecDeque`, client-side `Float32Array`) (036-webui-spectrogram)
+- TypeScript (Next.js 14+) for frontend; Rust backend unchanged + Next.js, React, Tailwind CSS (all existing) (037-webui-plot-polish)
+- N/A (UI-only changes) (037-webui-plot-polish)
 
 - Rust 1.7x (latest stable) + None (requires Rust toolchain: `rustc`, `cargo`) (001-init-rust-project)
 
@@ -73,9 +75,9 @@ cargo test [ONLY COMMANDS FOR ACTIVE TECHNOLOGIES][ONLY COMMANDS FOR ACTIVE TECH
 Rust 1.7x (latest stable): Follow standard conventions
 
 ## Recent Changes
+- 037-webui-plot-polish: Added TypeScript (Next.js 14+) for frontend; Rust backend unchanged + Next.js, React, Tailwind CSS (all existing)
 - 036-webui-spectrogram: Added Rust 1.7x (Edition 2021) + TypeScript 5 / Next.js 14.2
 - 036-webui-spectrogram: Added Rust 1.7x (Edition 2021) + TypeScript 5 / Next.js 14.2
-- 035-rsam-calculation: Added Rust 1.7x (latest stable) + Edition 2021 + `tokio` (async runtime, net, time), `tracing` (logging), `serde` (serialization) — all already in Cargo.toml
 
 
 <!-- MANUAL ADDITIONS START -->

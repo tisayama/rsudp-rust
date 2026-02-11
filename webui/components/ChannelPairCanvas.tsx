@@ -5,6 +5,7 @@ import { RingBuffer } from '../lib/RingBuffer';
 import { VisualAlertMarker, PlotSettings } from '../lib/types';
 import { INFERNO_RGB } from '../lib/inferno-colormap';
 import { formatEngineering } from '../lib/engineering-format';
+import { computeNiceTicks } from '../lib/nice-number';
 
 interface ChannelPairCanvasProps {
   channelId: string;
@@ -19,6 +20,7 @@ interface ChannelPairCanvasProps {
   settings: PlotSettings;
   isBottomChannel: boolean;
   units: string;
+  latestTimestamp: Date | null;
 }
 
 const BG_COLOR = '#202530';
@@ -29,19 +31,23 @@ const RESET_COLOR = '#D72638';
 const LEFT_MARGIN = 70;
 const RIGHT_MARGIN = 20;
 const TIME_AXIS_HEIGHT = 24;
+const TIME_LABEL_HEIGHT = 16;
+const SPEC_TOP_PAD = 8;
+const BORDER_COLOR = 'rgba(255, 255, 255, 0.6)';
+const GRID_COLOR = 'rgba(255, 255, 255, 0.15)';
 
 function getUnitLabel(units: string, channelId: string): string {
   switch (units.toUpperCase()) {
     case 'VEL': return 'Velocity (m/s)';
-    case 'ACC': return 'Acceleration (m/s²)';
+    case 'ACC': return 'Acceleration (m/s\u00B2)';
     case 'GRAV': return 'Earth gravity (g)';
     case 'DISP': return 'Displacement (m)';
     case 'CHAN': {
       // SEED instrument code (2nd character) determines physical quantity
       const inst = channelId.length >= 2 ? channelId[1] : '';
       if (inst === 'H' || inst === 'L') return 'Velocity (m/s)';   // Seismometer
-      if (inst === 'N') return 'Acceleration (m/s²)';               // Accelerometer
-      if (inst === 'G') return 'Acceleration (m/s²)';               // Gravimeter
+      if (inst === 'N') return 'Acceleration (m/s\u00B2)';               // Accelerometer
+      if (inst === 'G') return 'Acceleration (m/s\u00B2)';               // Gravimeter
       return 'Counts';
     }
     default: return 'Counts';
@@ -61,6 +67,7 @@ const ChannelPairCanvas: React.FC<ChannelPairCanvasProps> = ({
   settings,
   isBottomChannel,
   units,
+  latestTimestamp,
 }) => {
   const waveformCanvasRef = useRef<HTMLCanvasElement>(null);
   const spectrogramCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -73,14 +80,24 @@ const ChannelPairCanvas: React.FC<ChannelPairCanvasProps> = ({
   hopDurationRef.current = hopDuration;
   frequencyBinsRef.current = frequencyBins;
 
+  const latestTimestampRef = useRef<Date | null>(null);
+  latestTimestampRef.current = latestTimestamp;
+
   const showSpectrogram = settings.show_spectrogram;
-  const waveformHeight = showSpectrogram ? 200 : 200;
+  const waveformHeight = 200;
   const spectrogramHeight = showSpectrogram ? 100 : 0;
   const canvasWidth = 900;
 
-  // Every channel gets time axis labels at the bottom of its last canvas
-  const waveformCanvasHeight = showSpectrogram ? waveformHeight : waveformHeight + TIME_AXIS_HEIGHT;
-  const spectrogramCanvasHeight = spectrogramHeight + TIME_AXIS_HEIGHT;
+  // T004: Canvas height layout
+  // When spectrogram shown: waveform canvas = data + TIME_AXIS_HEIGHT (HH:MM:SS labels between plots)
+  // Spectrogram canvas = data + TIME_LABEL_HEIGHT (for "Time (UTC)" title below)
+  // When spectrogram hidden: waveform canvas = data + TIME_AXIS_HEIGHT + TIME_LABEL_HEIGHT
+  const waveformCanvasHeight = showSpectrogram
+    ? waveformHeight + TIME_AXIS_HEIGHT
+    : waveformHeight + TIME_AXIS_HEIGHT + TIME_LABEL_HEIGHT;
+  const spectrogramCanvasHeight = showSpectrogram
+    ? SPEC_TOP_PAD + spectrogramHeight + TIME_LABEL_HEIGHT
+    : 0;
 
   // Combined waveform + spectrogram rendering at 30 FPS
   useEffect(() => {
@@ -104,24 +121,43 @@ const ChannelPairCanvas: React.FC<ChannelPairCanvasProps> = ({
         for (let i = 0; i < samples.length; i++) sum += samples[i];
         const mean = sum / samples.length;
 
-        // Auto-scale
+        // T009: Auto-scale using actual min/max with nice-number expansion
         let yMin = -1000;
         let yMax = 1000;
+        let ticks: number[] = [];
         if (autoScale) {
-          let maxAbs = 0;
+          let dataMin = Infinity;
+          let dataMax = -Infinity;
           for (let i = 0; i < samples.length; i++) {
-            const v = Math.abs(samples[i] - mean);
-            if (v > maxAbs) maxAbs = v;
+            const v = samples[i] - mean;
+            if (v < dataMin) dataMin = v;
+            if (v > dataMax) dataMax = v;
           }
-          if (maxAbs > 0) {
-            yMin = -maxAbs * 1.1;
-            yMax = maxAbs * 1.1;
+          if (dataMin < dataMax) {
+            ticks = computeNiceTicks(dataMin, dataMax, 5);
+            yMin = ticks[0];
+            yMax = ticks[ticks.length - 1];
+          } else {
+            ticks = computeNiceTicks(yMin, yMax, 5);
           }
+        } else {
+          ticks = computeNiceTicks(yMin, yMax, 5);
         }
 
         const mapY = (val: number) => {
           return waveformHeight - ((val - yMin) / (yMax - yMin)) * waveformHeight;
         };
+
+        // T011: Horizontal grid lines at Y-axis tick positions (drawn before waveform line)
+        wCtx.strokeStyle = GRID_COLOR;
+        wCtx.lineWidth = 1;
+        for (const tick of ticks) {
+          const y = Math.round(mapY(tick)) + 0.5;
+          wCtx.beginPath();
+          wCtx.moveTo(LEFT_MARGIN, y);
+          wCtx.lineTo(LEFT_MARGIN + plotWidth, y);
+          wCtx.stroke();
+        }
 
         // Draw waveform line
         wCtx.strokeStyle = WAVEFORM_COLOR;
@@ -136,18 +172,15 @@ const ChannelPairCanvas: React.FC<ChannelPairCanvasProps> = ({
         }
         wCtx.stroke();
 
-        // Y-axis labels
+        // T010: Y-axis labels from nice-number ticks
         wCtx.fillStyle = FG_COLOR;
         wCtx.font = '10px Arial';
         wCtx.textAlign = 'right';
         const unitLabel = getUnitLabel(units, channelId);
 
-        // Y-axis tick values
-        const yTicks = 5;
-        for (let i = 0; i <= yTicks; i++) {
-          const val = yMin + (yMax - yMin) * (i / yTicks);
-          const y = mapY(val);
-          wCtx.fillText(formatEngineering(val), LEFT_MARGIN - 5, y + 3);
+        for (const tick of ticks) {
+          const y = mapY(tick);
+          wCtx.fillText(formatEngineering(tick), LEFT_MARGIN - 5, y + 3);
         }
 
         // Unit label (rotated)
@@ -169,14 +202,47 @@ const ChannelPairCanvas: React.FC<ChannelPairCanvasProps> = ({
       wCtx.textAlign = 'left';
       wCtx.fillText(channelId, LEFT_MARGIN + 5, 16);
 
+      // T007: Waveform plot border
+      wCtx.strokeStyle = BORDER_COLOR;
+      wCtx.lineWidth = 1;
+      wCtx.strokeRect(LEFT_MARGIN + 0.5, 0.5, plotWidth - 1, waveformHeight - 1);
+
+      // T005: Absolute time labels (HH:MM:SS UTC) below waveform, between plots
+      {
+        const ts = latestTimestampRef.current;
+        if (ts) {
+          const rightEdge = ts.getTime();
+          const leftEdge = rightEdge - windowSeconds * 1000;
+          const firstTick = Math.ceil(leftEdge / 10000) * 10000;
+
+          wCtx.fillStyle = FG_COLOR;
+          wCtx.font = '10px Arial';
+          wCtx.textAlign = 'center';
+
+          for (let t = firstTick; t <= rightEdge; t += 10000) {
+            const x = LEFT_MARGIN + ((t - leftEdge) / (windowSeconds * 1000)) * plotWidth;
+            const label = new Date(t).toISOString().substr(11, 8);
+            wCtx.fillText(label, x, waveformHeight + 14);
+          }
+        }
+
+        // T006: "Time (UTC)" title — below waveform when no spectrogram
+        if (!showSpectrogram) {
+          wCtx.fillStyle = FG_COLOR;
+          wCtx.font = '10px Arial';
+          wCtx.textAlign = 'center';
+          wCtx.fillText('Time (UTC)', LEFT_MARGIN + plotWidth / 2, waveformHeight + TIME_AXIS_HEIGHT + TIME_LABEL_HEIGHT - 2);
+        }
+      }
+
       // --- Spectrogram (time-aligned with waveform) ---
       if (showSpectrogram) {
         const sCanvas = spectrogramCanvasRef.current;
         if (sCanvas) {
           const sCtx = sCanvas.getContext('2d');
           if (sCtx) {
-            // Clear spectrogram canvas
-            sCtx.fillStyle = '#000000';
+            // Clear spectrogram canvas (same background as waveform)
+            sCtx.fillStyle = BG_COLOR;
             sCtx.fillRect(0, 0, canvasWidth, spectrogramCanvasHeight);
 
             // Render spectrogram columns time-aligned with waveform
@@ -217,11 +283,14 @@ const ChannelPairCanvas: React.FC<ChannelPairCanvasProps> = ({
                 }
               }
 
-              sCtx.putImageData(imageData, LEFT_MARGIN, 0);
+              sCtx.putImageData(imageData, LEFT_MARGIN, SPEC_TOP_PAD);
             }
 
-            // Draw alert markers on spectrogram (aligned with waveform)
+            // Draw alert markers on spectrogram (aligned with waveform, offset by top pad)
+            sCtx.save();
+            sCtx.translate(0, SPEC_TOP_PAD);
             drawAlertMarkers(sCtx, alerts, channelId, windowSeconds, LEFT_MARGIN, plotWidth, spectrogramHeight);
+            sCtx.restore();
 
             // Hz labels on left margin
             const nyquist = sampleRate / 2;
@@ -238,52 +307,37 @@ const ChannelPairCanvas: React.FC<ChannelPairCanvasProps> = ({
                 const logMin = Math.log10(Math.max(freqMin, 0.1));
                 const logMax = Math.log10(freqMax);
                 const logFreq = Math.log10(freq);
-                const y = spectrogramHeight - ((logFreq - logMin) / (logMax - logMin)) * spectrogramHeight;
+                const y = SPEC_TOP_PAD + spectrogramHeight - ((logFreq - logMin) / (logMax - logMin)) * spectrogramHeight;
                 sCtx.fillText(`${freq}`, 25, y + 3);
               }
             } else {
               const freqTicks = 5;
               for (let i = 0; i <= freqTicks; i++) {
                 const freq = freqMin + (freqMax - freqMin) * (i / freqTicks);
-                const y = spectrogramHeight - (i / freqTicks) * spectrogramHeight;
+                const y = SPEC_TOP_PAD + spectrogramHeight - (i / freqTicks) * spectrogramHeight;
                 sCtx.fillText(`${Math.round(freq)}`, 25, y + 3);
               }
             }
 
-            // "Hz" label
+            // T015: "Frequency (Hz)" label (rotated)
             sCtx.save();
-            sCtx.translate(8, spectrogramHeight / 2);
+            sCtx.translate(8, SPEC_TOP_PAD + spectrogramHeight / 2);
             sCtx.rotate(-Math.PI / 2);
             sCtx.textAlign = 'center';
             sCtx.font = '9px Arial';
-            sCtx.fillText('Hz', 0, 0);
+            sCtx.fillText('Frequency (Hz)', 0, 0);
             sCtx.restore();
-          }
-        }
-      }
 
-      // X-axis labels (on every channel pair)
-      {
-        const axisCtx = showSpectrogram
-          ? spectrogramCanvasRef.current?.getContext('2d')
-          : wCtx;
-        const axisBaseY = showSpectrogram ? spectrogramHeight : waveformHeight;
+            // T008: Spectrogram plot border
+            sCtx.strokeStyle = BORDER_COLOR;
+            sCtx.lineWidth = 1;
+            sCtx.strokeRect(LEFT_MARGIN + 0.5, SPEC_TOP_PAD + 0.5, plotWidth - 1, spectrogramHeight - 1);
 
-        if (axisCtx) {
-          axisCtx.fillStyle = FG_COLOR;
-          axisCtx.font = '10px Arial';
-          axisCtx.textAlign = 'center';
-
-          const xTickCount = Math.min(10, Math.floor(windowSeconds / 10));
-          const xStep = windowSeconds / xTickCount;
-          for (let i = 0; i <= xTickCount; i++) {
-            const sec = i * xStep;
-            const x = LEFT_MARGIN + (sec / windowSeconds) * plotWidth;
-            axisCtx.fillText(`${Math.round(sec)}`, x, axisBaseY + 14);
-          }
-
-          if (isBottomChannel) {
-            axisCtx.fillText('Time (seconds)', LEFT_MARGIN + plotWidth / 2, axisBaseY + TIME_AXIS_HEIGHT - 2);
+            // T006: "Time (UTC)" title below spectrogram
+            sCtx.fillStyle = FG_COLOR;
+            sCtx.font = '10px Arial';
+            sCtx.textAlign = 'center';
+            sCtx.fillText('Time (UTC)', LEFT_MARGIN + plotWidth / 2, SPEC_TOP_PAD + spectrogramHeight + TIME_LABEL_HEIGHT - 2);
           }
         }
       }
@@ -308,7 +362,7 @@ const ChannelPairCanvas: React.FC<ChannelPairCanvasProps> = ({
           width={canvasWidth}
           height={spectrogramCanvasHeight}
           className="w-full h-auto block"
-          style={{ background: '#000000' }}
+          style={{ background: BG_COLOR }}
         />
       )}
     </div>

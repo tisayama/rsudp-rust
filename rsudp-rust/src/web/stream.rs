@@ -141,6 +141,7 @@ pub struct WebState {
     pub history: SharedHistory,
     pub waveform_buffers: Arc<Mutex<HashMap<String, ChannelBuffer>>>, // Updated type
     pub alert_max_intensities: Arc<Mutex<HashMap<uuid::Uuid, f64>>>,
+    pub station_name: Arc<RwLock<String>>,
 }
 
 impl Default for WebState {
@@ -166,6 +167,7 @@ impl WebState {
             history: Arc::new(Mutex::new(AlertHistoryManager::new())),
             waveform_buffers: Arc::new(Mutex::new(HashMap::new())),
             alert_max_intensities: Arc::new(Mutex::new(HashMap::new())),
+            station_name: Arc::new(RwLock::new(String::new())),
         }
     }
 

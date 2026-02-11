@@ -25,16 +25,6 @@ export interface VisualAlertMarker {
   channel: string;
 }
 
-export interface AlertEvent {
-  id: string;
-  channel: string;
-  trigger_time: string;
-  reset_time: string | null;
-  max_ratio: number;
-  snapshot_path: string | null;
-  message: string | null;
-}
-
 export interface IntensityResult {
   instrumental_intensity: number;
   intensity_class: string;
