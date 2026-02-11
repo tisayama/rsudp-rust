@@ -6,13 +6,13 @@ services:
     container_name: rsudp-rust
     ports:
       - "${RSUDP_PORT:-8888}:8888/udp"
-      # Expose internal API/Websocket port if needed for host access, though frontend talks via internal network
-      - "${RSUDP_API_PORT:-8081}:8081" 
+      # Expose WebUI API/WebSocket port (backend default: 8080)
+      - "${RSUDP_API_PORT:-8080}:8080"
     environment:
       - RUST_LOG=info
     restart: on-failure
     volumes:
-      - ./rsudp.toml:/etc/rsudp/rsudp.toml:ro
+      - ./rsudp.toml:/etc/rsudp/:ro
       - ./output:/var/lib/rsudp
     networks:
       - rsudp-net
@@ -26,7 +26,7 @@ services:
       - "${WEB_PORT:-3000}:3000"
     environment:
       # Use service name for backend URL
-      - BACKEND_URL=http://rsudp-rust:8081
+      - BACKEND_URL=http://rsudp-rust:8080
     restart: on-failure
     volumes:
        - nextjs_cache:/app/.next/cache

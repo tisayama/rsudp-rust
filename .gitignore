@@ -21,6 +21,7 @@ yarn-error.log*
 
 # Environment
 .env*
+rsudp.toml
 
 # OS / Editors
 .DS_Store

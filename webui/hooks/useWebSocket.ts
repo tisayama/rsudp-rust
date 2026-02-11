@@ -1,12 +1,19 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { WsMessage } from '../lib/types';
+import { WsMessage, SpectrogramPacket } from '../lib/types';
 
-export const useWebSocket = (url: string) => {
+export interface UseWebSocketOptions {
+  onSpectrogramData?: (channelId: string, columns: Uint8Array[], frequencyBins: number, sampleRate: number, hopDuration: number) => void;
+}
+
+export const useWebSocket = (url: string, options?: UseWebSocketOptions) => {
   const [isConnected, setIsConnected] = useState(false);
   const [lastMessage, setLastMessage] = useState<WsMessage | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout>();
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
   const reconnectDelayRef = useRef(1000);
+  const lastTimestampRef = useRef<string | null>(null);
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
 
   const connect = useCallback(() => {
     if (socketRef.current?.readyState === WebSocket.CONNECTING || socketRef.current?.readyState === WebSocket.OPEN) return;
@@ -19,6 +26,13 @@ export const useWebSocket = (url: string) => {
       setIsConnected(true);
       reconnectDelayRef.current = 1000;
       console.log('Connected to WebSocket');
+
+      // Send BackfillRequest
+      const request: Record<string, unknown> = { type: 'BackfillRequest' };
+      if (lastTimestampRef.current) {
+        request.last_timestamp = lastTimestampRef.current;
+      }
+      socket.send(JSON.stringify(request));
     };
 
     socket.onmessage = async (event) => {
@@ -36,20 +50,24 @@ export const useWebSocket = (url: string) => {
         const view = new DataView(event.data);
         const type = view.getUint8(0);
 
-        if (type === 0) {
-          // Waveform
+        if (type === 0x00) {
+          // Waveform binary packet
           let offset = 1;
           const channelIdLen = view.getUint8(offset);
           offset += 1;
           const channelId = new TextDecoder().decode(event.data.slice(offset, offset + channelIdLen));
           offset += channelIdLen;
-          const tsMicros = BigInt(new BigInt64Array(event.data.slice(offset, offset + 8))[0]);
+          const tsMicros = new BigInt64Array(event.data.slice(offset, offset + 8))[0];
           offset += 8;
           const sampleRate = view.getFloat32(offset, true);
           offset += 4;
           const samplesCount = view.getUint32(offset, true);
           offset += 4;
-          const samples = new Float32Array(event.data.slice(offset));
+          const samples = new Float32Array(event.data.slice(offset, offset + samplesCount * 4));
+
+          // Update last_timestamp for reconnection backfill
+          const tsMs = Number(tsMicros / 1000n) + (samplesCount / sampleRate) * 1000;
+          lastTimestampRef.current = new Date(tsMs).toISOString();
 
           setLastMessage({
             type: 'Waveform',
@@ -60,18 +78,45 @@ export const useWebSocket = (url: string) => {
               sample_rate: sampleRate,
             }
           });
-                  } else if (type === 1) {
-                    // Alert
-                    const json = new TextDecoder().decode(event.data.slice(1));
-                    const alert = JSON.parse(json);
-                    setLastMessage({ type: 'Alert', data: alert });
-                  } else if (type === 2) {
-                    // Intensity
-                    const json = new TextDecoder().decode(event.data.slice(1));
-                    const intensity = JSON.parse(json);
-                    setLastMessage({ type: 'Intensity', data: intensity });
-                  }
-        
+        } else if (type === 0x03) {
+          // Spectrogram binary packet
+          let offset = 1;
+          const channelIdLen = view.getUint8(offset);
+          offset += 1;
+          const channelId = new TextDecoder().decode(event.data.slice(offset, offset + channelIdLen));
+          offset += channelIdLen;
+          // timestamp i64le (skip for rendering, used for alignment)
+          offset += 8;
+          const sampleRate = view.getFloat32(offset, true);
+          offset += 4;
+          const hopDuration = view.getFloat32(offset, true);
+          offset += 4;
+          const frequencyBins = view.getUint16(offset, true);
+          offset += 2;
+          const columnsCount = view.getUint16(offset, true);
+          offset += 2;
+
+          // Extract columns (column-major: each column has frequencyBins u8 values)
+          const columns: Uint8Array[] = [];
+          for (let col = 0; col < columnsCount; col++) {
+            const colStart = offset + col * frequencyBins;
+            const colData = new Uint8Array(event.data.slice(colStart, colStart + frequencyBins));
+            columns.push(colData);
+          }
+
+          // Notify via callback
+          optionsRef.current?.onSpectrogramData?.(channelId, columns, frequencyBins, sampleRate, hopDuration);
+        } else if (type === 1) {
+          // Alert
+          const json = new TextDecoder().decode(event.data.slice(1));
+          const alert = JSON.parse(json);
+          setLastMessage({ type: 'Alert', data: alert });
+        } else if (type === 2) {
+          // Intensity
+          const json = new TextDecoder().decode(event.data.slice(1));
+          const intensity = JSON.parse(json);
+          setLastMessage({ type: 'Intensity', data: intensity });
+        }
       }
     };
 
@@ -80,7 +125,7 @@ export const useWebSocket = (url: string) => {
       const delay = reconnectDelayRef.current;
       console.log(`Disconnected. Reconnecting in ${delay}ms...`);
       reconnectTimeoutRef.current = setTimeout(() => {
-        reconnectDelayRef.current = Math.min(delay * 2, 30000); // Max 30s
+        reconnectDelayRef.current = Math.min(delay * 2, 30000);
         connect();
       }, delay);
     };

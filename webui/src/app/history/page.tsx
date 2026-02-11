@@ -2,13 +2,14 @@
 
 import { useEffect, useState } from 'react';
 import { AlertEvent } from '../../../lib/types';
+import { getBackendOrigin } from '../../../lib/api';
 import Link from 'next/link';
 
 export default function HistoryPage() {
   const [history, setHistory] = useState<AlertEvent[]>([]);
 
   useEffect(() => {
-    fetch('http://localhost:8080/api/alerts')
+    fetch(`${getBackendOrigin()}/api/alerts`)
       .then(res => res.json())
       .then(data => setHistory(data))
       .catch(err => console.error('Failed to fetch history:', err));
@@ -66,10 +67,10 @@ export default function HistoryPage() {
                   <div className="md:w-64 aspect-video bg-slate-100 rounded-xl overflow-hidden border border-slate-200">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img 
-                      src={`http://localhost:8080/images/alerts/${event.snapshot_path}`} 
+                      src={`${getBackendOrigin()}/images/alerts/${event.snapshot_path}`}
                       alt="Waveform snapshot"
                       className="w-full h-full object-cover cursor-zoom-in hover:scale-105 transition-transform"
-                      onClick={() => window.open(`http://localhost:8080/images/alerts/${event.snapshot_path}`, '_blank')}
+                      onClick={() => window.open(`${getBackendOrigin()}/images/alerts/${event.snapshot_path}`, '_blank')}
                     />
                   </div>
                 )}

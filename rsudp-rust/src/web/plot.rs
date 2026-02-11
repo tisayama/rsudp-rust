@@ -57,6 +57,54 @@ pub fn compute_spectrogram(samples: &[f64], sample_rate: f64, nfft: usize, nover
     Spectrogram { frequencies, times, data }
 }
 
+#[derive(Debug, Clone)]
+pub struct SpectrogramU8 {
+    pub frequency_bins: usize,   // NFFT/2 + 1
+    pub sample_rate: f64,
+    pub columns: Vec<Vec<u8>>,   // [time_column][frequency_bin] — u8 (0-255)
+    pub timestamps: Vec<f64>,    // each column's relative time (seconds)
+}
+
+pub fn compute_spectrogram_u8(samples: &[f64], sample_rate: f64, nfft: usize, noverlap: usize) -> SpectrogramU8 {
+    let spec = compute_spectrogram(samples, sample_rate, nfft, noverlap);
+
+    let frequency_bins = nfft / 2 + 1;
+
+    if spec.data.is_empty() {
+        return SpectrogramU8 {
+            frequency_bins,
+            sample_rate,
+            columns: Vec::new(),
+            timestamps: spec.times,
+        };
+    }
+
+    // Find global max for auto-normalization
+    let mut max_mag_sq: f64 = 1e-10;
+    for row in &spec.data {
+        for &val in row {
+            if val > max_mag_sq {
+                max_mag_sq = val;
+            }
+        }
+    }
+
+    // Apply power scaling (^1/10) and normalize to 0-255
+    let columns: Vec<Vec<u8>> = spec.data.iter().map(|row| {
+        row.iter().map(|&mag_sq| {
+            let normalized = (mag_sq / max_mag_sq).powf(0.1);
+            (normalized * 255.0).round().min(255.0).max(0.0) as u8
+        }).collect()
+    }).collect();
+
+    SpectrogramU8 {
+        frequency_bins,
+        sample_rate,
+        columns,
+        timestamps: spec.times,
+    }
+}
+
 fn get_jma_color(shindo: &str) -> RGBColor {
     match shindo {
         "0" => RGBColor(242, 242, 255),
@@ -283,6 +331,49 @@ pub fn draw_rsudp_plot(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_compute_spectrogram_u8() {
+        let sample_rate = 100.0;
+        let nfft = 128;
+        let noverlap = (nfft as f64 * 0.9) as usize; // 90% overlap
+        let duration = 5.0;
+        let n_samples = (duration * sample_rate) as usize;
+
+        // Generate 10 Hz sine wave
+        let freq = 10.0;
+        let samples: Vec<f64> = (0..n_samples)
+            .map(|i| (2.0 * std::f64::consts::PI * freq * i as f64 / sample_rate).sin() * 1000.0)
+            .collect();
+
+        let spec = compute_spectrogram_u8(&samples, sample_rate, nfft, noverlap);
+
+        assert_eq!(spec.frequency_bins, nfft / 2 + 1);
+        assert!(!spec.columns.is_empty());
+        assert_eq!(spec.columns[0].len(), nfft / 2 + 1);
+
+        // Check all columns have correct length
+        for col in &spec.columns {
+            assert_eq!(col.len(), nfft / 2 + 1);
+        }
+
+        // The peak should be at the 10 Hz frequency bin
+        // bin index = freq * nfft / sample_rate = 10 * 128 / 100 = 12.8 ≈ 13
+        let expected_bin = (freq * nfft as f64 / sample_rate).round() as usize;
+        // Check that the expected bin has a high value (close to 255) in at least one column
+        let max_at_peak = spec.columns.iter()
+            .map(|col| col[expected_bin])
+            .max()
+            .unwrap_or(0);
+        assert!(max_at_peak > 200, "Expected peak bin {} to have high value, got {}", expected_bin, max_at_peak);
+    }
+
+    #[test]
+    fn test_compute_spectrogram_u8_empty() {
+        let spec = compute_spectrogram_u8(&[], 100.0, 128, 115);
+        assert!(spec.columns.is_empty());
+        assert_eq!(spec.frequency_bins, 65);
+    }
 
     #[test]
     fn test_spectrogram_dimensions() {
