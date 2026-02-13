@@ -1,11 +1,12 @@
 'use client';
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState, useLayoutEffect } from 'react';
 import { RingBuffer } from '../lib/RingBuffer';
 import { VisualAlertMarker, PlotSettings } from '../lib/types';
 import { INFERNO_RGB } from '../lib/inferno-colormap';
 import { formatEngineering } from '../lib/engineering-format';
 import { computeNiceTicks } from '../lib/nice-number';
+import { drawSimplifiedPath } from '../lib/path-simplifier';
 
 interface ChannelPairCanvasProps {
   channelId: string;
@@ -21,6 +22,8 @@ interface ChannelPairCanvasProps {
   isBottomChannel: boolean;
   units: string;
   latestTimestamp: Date | null;
+  channelLatestTimestamp: Date | null;
+  spectrogramFirstColumnTimestamp: number;
 }
 
 const BG_COLOR = '#202530';
@@ -68,6 +71,8 @@ const ChannelPairCanvas: React.FC<ChannelPairCanvasProps> = ({
   isBottomChannel,
   units,
   latestTimestamp,
+  channelLatestTimestamp,
+  spectrogramFirstColumnTimestamp,
 }) => {
   const waveformCanvasRef = useRef<HTMLCanvasElement>(null);
   const spectrogramCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -83,10 +88,41 @@ const ChannelPairCanvas: React.FC<ChannelPairCanvasProps> = ({
   const latestTimestampRef = useRef<Date | null>(null);
   latestTimestampRef.current = latestTimestamp;
 
+  const channelLatestTimestampRef = useRef<Date | null>(null);
+  channelLatestTimestampRef.current = channelLatestTimestamp;
+
+  const spectrogramFirstColumnTimestampRef = useRef(0);
+  spectrogramFirstColumnTimestampRef.current = spectrogramFirstColumnTimestamp;
+
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [canvasWidth, setCanvasWidth] = useState(900); // fallback until measured
+
+  // Measure actual container width so canvas internal resolution = CSS display size.
+  // This ensures 1 canvas pixel = 1 CSS pixel, matching matplotlib's 1:1 device-pixel rendering.
+  useLayoutEffect(() => {
+    const el = containerRef.current;
+    if (el) {
+      const w = Math.round(el.clientWidth);
+      if (w > 0) setCanvasWidth(w);
+    }
+  }, []);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(entries => {
+      for (const e of entries) {
+        const w = Math.round(e.contentRect.width);
+        if (w > 0) setCanvasWidth(w);
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   const showSpectrogram = settings.show_spectrogram;
   const waveformHeight = 200;
   const spectrogramHeight = showSpectrogram ? 100 : 0;
-  const canvasWidth = 900;
 
   // T004: Canvas height layout
   // When spectrogram shown: waveform canvas = data + TIME_AXIS_HEIGHT (HH:MM:SS labels between plots)
@@ -111,11 +147,17 @@ const ChannelPairCanvas: React.FC<ChannelPairCanvasProps> = ({
       const plotWidth = canvasWidth - LEFT_MARGIN - RIGHT_MARGIN;
       const samples = buffer.getTail(windowSeconds * sampleRate);
 
+      // Global time edges for synchronized rendering
+      const globalTs = latestTimestampRef.current;
+      const rightEdge = globalTs ? globalTs.getTime() : 0;
+      const leftEdge = rightEdge - windowSeconds * 1000;
+      const channelTs = channelLatestTimestampRef.current;
+
       // --- Waveform ---
       wCtx.fillStyle = BG_COLOR;
       wCtx.fillRect(0, 0, canvasWidth, waveformCanvasHeight);
 
-      if (samples.length > 0) {
+      if (samples.length > 0 && rightEdge > 0 && channelTs) {
         // DC offset removal
         let sum = 0;
         for (let i = 0; i < samples.length; i++) sum += samples[i];
@@ -159,18 +201,37 @@ const ChannelPairCanvas: React.FC<ChannelPairCanvasProps> = ({
           wCtx.stroke();
         }
 
-        // Draw waveform line
+        // Draw waveform using matplotlib-compatible path simplification
+        // matplotlib lw=0.45 is in POINTS (1/72 inch). At 100 DPI: 0.45 * 100/72 = 0.625 device pixels.
+        // All samples are transformed to pixel coordinates, then simplified using
+        // matplotlib's perpendicular-distance algorithm with forward/backward extreme
+        // tracking. This is geometry-driven (not pixel-bin based), so small time shifts
+        // don't change which points are selected → no jitter.
+        const chTsMs = channelTs.getTime();
         wCtx.strokeStyle = WAVEFORM_COLOR;
-        wCtx.lineWidth = 0.45;
+        wCtx.lineWidth = 0.625;
         wCtx.lineJoin = 'round';
-        wCtx.beginPath();
-        for (let i = 0; i < samples.length; i++) {
-          const x = LEFT_MARGIN + (i / (windowSeconds * sampleRate)) * plotWidth;
-          const y = mapY(samples[i] - mean);
-          if (i === 0) wCtx.moveTo(x, y);
-          else wCtx.lineTo(x, y);
+
+        // Transform visible samples to pixel coordinates
+        const firstSampleTimeMs = chTsMs - ((samples.length - 1) / sampleRate) * 1000;
+        const visStart = Math.max(0, Math.ceil((leftEdge - firstSampleTimeMs) / 1000 * sampleRate));
+        const visEnd = Math.min(samples.length - 1, Math.floor((rightEdge - firstSampleTimeMs) / 1000 * sampleRate));
+        const visCount = Math.max(0, visEnd - visStart + 1);
+
+        if (visCount > 0) {
+          const pxX = new Float64Array(visCount);
+          const pxY = new Float64Array(visCount);
+          for (let i = visStart; i <= visEnd; i++) {
+            const sampleTime = chTsMs - ((samples.length - 1 - i) / sampleRate) * 1000;
+            const j = i - visStart;
+            pxX[j] = LEFT_MARGIN + ((sampleTime - leftEdge) / (windowSeconds * 1000)) * plotWidth;
+            pxY[j] = mapY(samples[i] - mean);
+          }
+
+          wCtx.beginPath();
+          drawSimplifiedPath(wCtx, pxX, pxY, visCount);
+          wCtx.stroke();
         }
-        wCtx.stroke();
 
         // T010: Y-axis labels from nice-number ticks
         wCtx.fillStyle = FG_COLOR;
@@ -193,7 +254,7 @@ const ChannelPairCanvas: React.FC<ChannelPairCanvasProps> = ({
         wCtx.restore();
 
         // Draw alert markers on waveform
-        drawAlertMarkers(wCtx, alerts, channelId, windowSeconds, LEFT_MARGIN, plotWidth, waveformHeight);
+        drawAlertMarkers(wCtx, alerts, channelId, windowSeconds, LEFT_MARGIN, plotWidth, waveformHeight, rightEdge);
       }
 
       // Channel name legend
@@ -206,6 +267,20 @@ const ChannelPairCanvas: React.FC<ChannelPairCanvasProps> = ({
       wCtx.strokeStyle = BORDER_COLOR;
       wCtx.lineWidth = 1;
       wCtx.strokeRect(LEFT_MARGIN + 0.5, 0.5, plotWidth - 1, waveformHeight - 1);
+
+      // Bandpass label (lower-left of waveform, only when filter enabled)
+      if (settings.filter_waveform) {
+        const bpLabel = `Bandpass (${settings.filter_highpass} - ${settings.filter_lowpass} Hz)`;
+        wCtx.font = '9px Arial';
+        const bpMetrics = wCtx.measureText(bpLabel);
+        const bpX = LEFT_MARGIN + 5;
+        const bpY = waveformHeight - 5;
+        wCtx.fillStyle = 'rgba(32, 37, 48, 0.7)';
+        wCtx.fillRect(bpX - 2, bpY - 9, bpMetrics.width + 4, 12);
+        wCtx.fillStyle = FG_COLOR;
+        wCtx.textAlign = 'left';
+        wCtx.fillText(bpLabel, bpX, bpY);
+      }
 
       // T005: Absolute time labels (HH:MM:SS UTC) below waveform, between plots
       {
@@ -250,36 +325,61 @@ const ChannelPairCanvas: React.FC<ChannelPairCanvasProps> = ({
             const hd = hopDurationRef.current;
             const fBins = frequencyBinsRef.current;
 
-            if (cols.length > 0 && hd > 0) {
-              // Number of columns that cover the visible time window
-              const maxVisibleCols = Math.ceil(windowSeconds / hd);
-              const startCol = Math.max(0, cols.length - maxVisibleCols);
-              const visibleCols = cols.slice(startCol);
-              const numCols = visibleCols.length;
+            if (cols.length > 0 && hd > 0 && rightEdge > 0) {
+              const firstColTs = spectrogramFirstColumnTimestampRef.current;
+              const nyq = sampleRate / 2;
+              const fMin = settings.spectrogram_freq_min || 0;
+              const fMax = settings.spectrogram_freq_max || nyq;
+              const logY = settings.spectrogram_log_y;
+              const logMin = logY ? Math.log10(Math.max(fMin, 0.1)) : 0;
+              const logMax = logY ? Math.log10(fMax) : 0;
 
-              // Render as ImageData aligned with waveform plot area
+              // Pre-compute pixel Y → FFT bin index lookup table
+              const binLookup = new Uint16Array(spectrogramHeight);
+              for (let y = 0; y < spectrogramHeight; y++) {
+                const frac = (spectrogramHeight - 1 - y) / (spectrogramHeight - 1);
+                let freq: number;
+                if (logY) {
+                  freq = Math.pow(10, logMin + frac * (logMax - logMin));
+                } else {
+                  freq = fMin + frac * (fMax - fMin);
+                }
+                const bin = Math.round((freq / nyq) * (fBins - 1));
+                binLookup[y] = Math.max(0, Math.min(fBins - 1, bin));
+              }
+
+              // Column-driven rendering with timestamp-based positioning
               const imageData = sCtx.createImageData(plotWidth, spectrogramHeight);
               const pixels = imageData.data;
 
-              for (let x = 0; x < plotWidth; x++) {
-                // Map pixel x to column index (same time mapping as waveform)
-                const colIdx = Math.floor((x / plotWidth) * maxVisibleCols);
-                if (colIdx >= numCols) continue;
+              // Skip columns before visible window
+              const firstVisibleIdx = Math.max(0, Math.floor((leftEdge - firstColTs) / (hd * 1000)));
 
-                const col = visibleCols[colIdx];
+              for (let ci = firstVisibleIdx; ci < cols.length; ci++) {
+                const colTime = firstColTs + ci * hd * 1000;
+                if (colTime > rightEdge) break;
+
+                const col = cols[ci];
                 if (!col || col.length !== fBins) continue;
 
-                for (let y = 0; y < spectrogramHeight; y++) {
-                  // Map canvas row to frequency bin (bottom = 0 Hz, top = Nyquist)
-                  const binIndex = Math.floor(((spectrogramHeight - 1 - y) / (spectrogramHeight - 1)) * (fBins - 1));
-                  const value = col[Math.min(binIndex, fBins - 1)];
-                  const clampedIdx = Math.max(0, Math.min(INFERNO_RGB.length - 1, value));
-                  const [r, g, b] = INFERNO_RGB[clampedIdx];
-                  const pixelOffset = (y * plotWidth + x) * 4;
-                  pixels[pixelOffset] = r;
-                  pixels[pixelOffset + 1] = g;
-                  pixels[pixelOffset + 2] = b;
-                  pixels[pixelOffset + 3] = 255;
+                // Compute pixel x range for this column
+                const x = Math.round(((colTime - leftEdge) / (windowSeconds * 1000)) * plotWidth);
+                const nextColTime = colTime + hd * 1000;
+                const nextX = Math.round(((nextColTime - leftEdge) / (windowSeconds * 1000)) * plotWidth);
+                const xStart = Math.max(0, x);
+                const xEnd = Math.min(plotWidth, nextX);
+
+                for (let px = xStart; px < xEnd; px++) {
+                  for (let y = 0; y < spectrogramHeight; y++) {
+                    const value = col[binLookup[y]];
+                    const clampedIdx = Math.max(0, Math.min(INFERNO_RGB.length - 1, value));
+                    const [r, g, b] = INFERNO_RGB[clampedIdx];
+                    const pixelOffset = (y * plotWidth + px) * 4;
+                    pixels[pixelOffset] = r;
+                    pixels[pixelOffset + 1] = g;
+                    pixels[pixelOffset + 2] = b;
+                    pixels[pixelOffset + 3] = 255;
+                  }
                 }
               }
 
@@ -289,7 +389,7 @@ const ChannelPairCanvas: React.FC<ChannelPairCanvasProps> = ({
             // Draw alert markers on spectrogram (aligned with waveform, offset by top pad)
             sCtx.save();
             sCtx.translate(0, SPEC_TOP_PAD);
-            drawAlertMarkers(sCtx, alerts, channelId, windowSeconds, LEFT_MARGIN, plotWidth, spectrogramHeight);
+            drawAlertMarkers(sCtx, alerts, channelId, windowSeconds, LEFT_MARGIN, plotWidth, spectrogramHeight, rightEdge);
             sCtx.restore();
 
             // Hz labels on left margin
@@ -333,6 +433,20 @@ const ChannelPairCanvas: React.FC<ChannelPairCanvasProps> = ({
             sCtx.lineWidth = 1;
             sCtx.strokeRect(LEFT_MARGIN + 0.5, SPEC_TOP_PAD + 0.5, plotWidth - 1, spectrogramHeight - 1);
 
+            // Range label (lower-left of spectrogram)
+            {
+              const rangeLabel = `Range (${settings.spectrogram_freq_min} - ${settings.spectrogram_freq_max} Hz)`;
+              sCtx.font = '9px Arial';
+              const rangeMetrics = sCtx.measureText(rangeLabel);
+              const rX = LEFT_MARGIN + 5;
+              const rY = SPEC_TOP_PAD + spectrogramHeight - 5;
+              sCtx.fillStyle = 'rgba(32, 37, 48, 0.7)';
+              sCtx.fillRect(rX - 2, rY - 9, rangeMetrics.width + 4, 12);
+              sCtx.fillStyle = FG_COLOR;
+              sCtx.textAlign = 'left';
+              sCtx.fillText(rangeLabel, rX, rY);
+            }
+
             // T006: "Time (UTC)" title below spectrogram
             sCtx.fillStyle = FG_COLOR;
             sCtx.font = '10px Arial';
@@ -343,26 +457,39 @@ const ChannelPairCanvas: React.FC<ChannelPairCanvasProps> = ({
       }
     };
 
-    const interval = setInterval(render, 33); // ~30 FPS
-    return () => clearInterval(interval);
+    // Use requestAnimationFrame for synchronized rendering across all channels.
+    // All RAF callbacks fire in the same browser paint frame, ensuring channels
+    // read the same latestTimestamp and scroll in perfect sync.
+    let rafId: number;
+    let lastRenderTime = 0;
+    const renderLoop = (timestamp: number) => {
+      // Throttle to ~30 FPS (33ms between frames)
+      if (timestamp - lastRenderTime >= 33) {
+        lastRenderTime = timestamp;
+        render();
+      }
+      rafId = requestAnimationFrame(renderLoop);
+    };
+    rafId = requestAnimationFrame(renderLoop);
+    return () => cancelAnimationFrame(rafId);
   }, [buffer, canvasWidth, waveformHeight, waveformCanvasHeight, windowSeconds, sampleRate, autoScale, alerts, channelId, showSpectrogram, spectrogramHeight, spectrogramCanvasHeight, settings, isBottomChannel, units]);
 
   return (
-    <div className="relative">
+    <div ref={containerRef} className="relative">
       <canvas
         ref={waveformCanvasRef}
         width={canvasWidth}
         height={waveformCanvasHeight}
-        className="w-full h-auto block"
-        style={{ background: BG_COLOR }}
+        className="block"
+        style={{ width: '100%', background: BG_COLOR }}
       />
       {showSpectrogram && (
         <canvas
           ref={spectrogramCanvasRef}
           width={canvasWidth}
           height={spectrogramCanvasHeight}
-          className="w-full h-auto block"
-          style={{ background: BG_COLOR }}
+          className="block"
+          style={{ width: '100%', background: BG_COLOR }}
         />
       )}
     </div>
@@ -377,17 +504,17 @@ function drawAlertMarkers(
   xOffset: number,
   plotWidth: number,
   height: number,
+  rightEdge: number,
 ) {
-  const now = new Date();
+  if (rightEdge <= 0) return;
+  const leftEdge = rightEdge - windowSeconds * 1000;
   for (const alert of alerts) {
     if (alert.channel !== channelId) continue;
 
-    const alertTime = new Date(alert.timestamp);
-    const diffMs = now.getTime() - alertTime.getTime();
-    const diffSec = diffMs / 1000;
+    const alertMs = new Date(alert.timestamp).getTime();
 
-    if (diffSec >= 0 && diffSec <= windowSeconds) {
-      const x = xOffset + plotWidth - (diffSec / windowSeconds) * plotWidth;
+    if (alertMs >= leftEdge && alertMs <= rightEdge) {
+      const x = xOffset + ((alertMs - leftEdge) / (windowSeconds * 1000)) * plotWidth;
 
       ctx.beginPath();
       ctx.setLineDash([5, 5]);

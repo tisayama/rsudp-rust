@@ -22,7 +22,7 @@ impl Biquad {
         Self { b0, b1, b2, a1, a2, s1: 0.0, s2: 0.0 }
     }
     
-    fn process(&mut self, x: f64) -> f64 {
+    pub fn process(&mut self, x: f64) -> f64 {
         let y = self.b0 * x + self.s1;
         self.s1 = self.b1 * x - self.a1 * y + self.s2;
         self.s2 = self.b2 * x - self.a2 * y;

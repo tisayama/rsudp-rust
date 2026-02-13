@@ -1,3 +1,4 @@
+pub mod filter;
 pub mod forward;
 pub mod hue;
 pub mod intensity;

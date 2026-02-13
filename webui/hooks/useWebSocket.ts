@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { WsMessage, SpectrogramPacket } from '../lib/types';
 
 export interface UseWebSocketOptions {
-  onSpectrogramData?: (channelId: string, columns: Uint8Array[], frequencyBins: number, sampleRate: number, hopDuration: number) => void;
+  onSpectrogramData?: (batchTimestamp: number, channelId: string, columns: Uint8Array[], frequencyBins: number, sampleRate: number, hopDuration: number) => void;
 }
 
 export const useWebSocket = (url: string, options?: UseWebSocketOptions) => {
@@ -18,6 +18,7 @@ export const useWebSocket = (url: string, options?: UseWebSocketOptions) => {
   const connect = useCallback(() => {
     if (socketRef.current?.readyState === WebSocket.CONNECTING || socketRef.current?.readyState === WebSocket.OPEN) return;
 
+    console.log(`[WS] Connecting to ${url} at ${new Date().toISOString()}`);
     const socket = new WebSocket(url);
     socket.binaryType = 'arraybuffer';
     socketRef.current = socket;
@@ -25,7 +26,7 @@ export const useWebSocket = (url: string, options?: UseWebSocketOptions) => {
     socket.onopen = () => {
       setIsConnected(true);
       reconnectDelayRef.current = 1000;
-      console.log('Connected to WebSocket');
+      console.log(`[WS] Connected at ${new Date().toISOString()}`);
 
       // Send BackfillRequest
       const request: Record<string, unknown> = { type: 'BackfillRequest' };
@@ -41,7 +42,7 @@ export const useWebSocket = (url: string, options?: UseWebSocketOptions) => {
           const msg = JSON.parse(event.data) as WsMessage;
           setLastMessage(msg);
         } catch (e) {
-          console.error('Failed to parse WebSocket message:', e);
+          console.error('[WS] Failed to parse WebSocket message:', e);
         }
         return;
       }
@@ -85,7 +86,9 @@ export const useWebSocket = (url: string, options?: UseWebSocketOptions) => {
           offset += 1;
           const channelId = new TextDecoder().decode(event.data.slice(offset, offset + channelIdLen));
           offset += channelIdLen;
-          // timestamp i64le (skip for rendering, used for alignment)
+          // timestamp i64le (microseconds since epoch)
+          const specTsMicros = new BigInt64Array(event.data.slice(offset, offset + 8))[0];
+          const batchTimestamp = Number(specTsMicros / 1000n); // convert to milliseconds
           offset += 8;
           const sampleRate = view.getFloat32(offset, true);
           offset += 4;
@@ -104,8 +107,8 @@ export const useWebSocket = (url: string, options?: UseWebSocketOptions) => {
             columns.push(colData);
           }
 
-          // Notify via callback
-          optionsRef.current?.onSpectrogramData?.(channelId, columns, frequencyBins, sampleRate, hopDuration);
+          // Notify via callback (batchTimestamp = start time of first column in this batch)
+          optionsRef.current?.onSpectrogramData?.(batchTimestamp, channelId, columns, frequencyBins, sampleRate, hopDuration);
         } else if (type === 1) {
           // Alert
           const json = new TextDecoder().decode(event.data.slice(1));
@@ -120,10 +123,10 @@ export const useWebSocket = (url: string, options?: UseWebSocketOptions) => {
       }
     };
 
-    socket.onclose = () => {
+    socket.onclose = (event) => {
       setIsConnected(false);
       const delay = reconnectDelayRef.current;
-      console.log(`Disconnected. Reconnecting in ${delay}ms...`);
+      console.log(`[WS] Disconnected at ${new Date().toISOString()} code=${event.code} reason="${event.reason}" wasClean=${event.wasClean}. Reconnecting in ${delay}ms...`);
       reconnectTimeoutRef.current = setTimeout(() => {
         reconnectDelayRef.current = Math.min(delay * 2, 30000);
         connect();
@@ -131,7 +134,7 @@ export const useWebSocket = (url: string, options?: UseWebSocketOptions) => {
     };
 
     socket.onerror = (error) => {
-      console.error('WebSocket Error:', error);
+      console.error(`[WS] Error at ${new Date().toISOString()}:`, error);
       socket.close();
     };
   }, [url]);

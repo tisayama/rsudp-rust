@@ -15,6 +15,11 @@ export interface PlotSettings {
   spectrogram_freq_min: number;
   spectrogram_freq_max: number;
   spectrogram_log_y: boolean;
+  deconvolve: boolean;
+  filter_waveform: boolean;
+  filter_highpass: number;
+  filter_lowpass: number;
+  filter_corners: number;
 }
 
 export type AlertEventType = 'Alarm' | 'Reset';

@@ -5,7 +5,9 @@ use std::net::IpAddr;
 pub struct Discovery;
 
 impl Discovery {
-    pub async fn find_bridge(timeout: Duration, target_id: Option<String>) -> Option<(String, IpAddr)> {
+    /// Synchronous mDNS discovery — MUST be called via spawn_blocking to avoid
+    /// starving the tokio executor.
+    pub fn find_bridge_blocking(timeout: Duration, target_id: Option<String>) -> Option<(String, IpAddr)> {
         let mdns = ServiceDaemon::new().ok()?;
         let service_type = "_hue._tcp.local.";
         let receiver = mdns.browse(service_type).ok()?;
@@ -17,7 +19,7 @@ impl Discovery {
                     let addresses = info.get_addresses();
                     // Prefer IPv4
                     let target_ip = addresses.iter().find(|ip| ip.is_ipv4()).or_else(|| addresses.iter().next());
-                    
+
                     if let Some(ip) = target_ip {
                         let raw_id = info.get_properties().get("bridgeid").map(|p| p.to_string()).unwrap_or_default();
                         // Clean up if it contains "bridgeid=" prefix
@@ -26,15 +28,15 @@ impl Discovery {
                         } else {
                             raw_id
                         };
-                        
+
                         let clean_id = id.to_lowercase();
-                        
+
                         if let Some(target) = &target_id {
                             if !clean_id.eq_ignore_ascii_case(target) {
                                 continue;
                             }
                         }
-                        
+
                         return Some((clean_id, *ip));
                     }
                 }

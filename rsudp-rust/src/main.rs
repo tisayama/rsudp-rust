@@ -151,6 +151,14 @@ async fn main() {
         plot_settings.output_dir = settings.settings.output_dir.clone();
         plot_settings.deconvolve = settings.alert.deconvolve;
         plot_settings.units = settings.alert.units.clone();
+        plot_settings.show_spectrogram = settings.plot.spectrogram;
+        plot_settings.spectrogram_freq_min = settings.plot.lower_limit;
+        plot_settings.spectrogram_freq_max = settings.plot.upper_limit;
+        plot_settings.spectrogram_log_y = settings.plot.logarithmic_y_axis;
+        plot_settings.filter_waveform = settings.plot.filter_waveform;
+        plot_settings.filter_highpass = settings.plot.filter_highpass;
+        plot_settings.filter_lowpass = settings.plot.filter_lowpass;
+        plot_settings.filter_corners = settings.plot.filter_corners as usize;
     }
     
     // Update default history settings as well
@@ -205,6 +213,12 @@ async fn main() {
             fallback
         }
     };
+
+    // Populate sensitivity map in WebState for WebUI deconvolution
+    {
+        let mut sm = web_state.sensitivity_map.write().unwrap();
+        *sm = sens_map.clone();
+    }
 
     // 2. Setup Configs
     let trigger_config = TriggerConfig {

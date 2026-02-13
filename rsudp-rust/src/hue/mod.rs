@@ -70,12 +70,23 @@ impl HueIntegration {
 
     async fn discovery_loop(&self) {
         loop {
-            if let Some((_id, ip)) = Discovery::find_bridge(Duration::from_secs(5), self.config.bridge_id.clone()).await {
+            // Run synchronous mDNS discovery on a blocking thread so it doesn't
+            // starve the tokio executor (recv_timeout is blocking I/O).
+            let bridge_id = self.config.bridge_id.clone();
+            let result = tokio::task::spawn_blocking(move || {
+                Discovery::find_bridge_blocking(Duration::from_secs(5), bridge_id)
+            }).await.ok().flatten();
+
+            if let Some((_id, ip)) = result {
                 match HueClient::new(&ip.to_string(), Some(self.config.app_key.clone())) {
                     Ok(c) => {
                         let mut guard = self.client.lock().await;
                         *guard = Some(c);
                         info!("Hue Integration connected to Bridge at {}", ip);
+                        // Bridge found and connected — no need for aggressive re-discovery.
+                        // Re-check every 10 minutes in case bridge IP changes.
+                        tokio::time::sleep(Duration::from_secs(600)).await;
+                        continue;
                     }
                     Err(e) => error!("Failed to create Hue client: {}", e),
                 }

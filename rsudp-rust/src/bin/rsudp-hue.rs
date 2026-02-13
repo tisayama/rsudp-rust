@@ -27,7 +27,9 @@ async fn main() {
     match &cli.command {
         Some(Commands::Setup) => {
             println!("Discovering Hue Bridges...");
-            match Discovery::find_bridge(Duration::from_secs(5), None).await {
+            match tokio::task::spawn_blocking(move || {
+                Discovery::find_bridge_blocking(Duration::from_secs(5), None)
+            }).await.ok().flatten() {
                 Some((id, ip)) => {
                     println!("Found Bridge: {} at {}", id, ip);
                     println!("Please press the Link Button on the Hue Bridge NOW.");
