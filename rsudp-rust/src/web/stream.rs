@@ -1,3 +1,4 @@
+use crate::filter::BiquadChain;
 use crate::intensity::IntensityResult;
 use crate::trigger::AlertEvent;
 use crate::web::history::{AlertHistoryManager, SharedHistory};
@@ -27,6 +28,14 @@ pub struct PlotSettings {
     pub deconvolve: bool,
     pub units: String,
     pub eq_screenshots: bool,
+    pub show_spectrogram: bool,
+    pub spectrogram_freq_min: f64,
+    pub spectrogram_freq_max: f64,
+    pub spectrogram_log_y: bool,
+    pub filter_waveform: bool,
+    pub filter_highpass: f64,
+    pub filter_lowpass: f64,
+    pub filter_corners: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -142,6 +151,7 @@ pub struct WebState {
     pub waveform_buffers: Arc<Mutex<HashMap<String, ChannelBuffer>>>, // Updated type
     pub alert_max_intensities: Arc<Mutex<HashMap<uuid::Uuid, f64>>>,
     pub station_name: Arc<RwLock<String>>,
+    pub sensitivity_map: Arc<RwLock<HashMap<String, f64>>>,
 }
 
 impl Default for WebState {
@@ -155,7 +165,7 @@ impl WebState {
         let (tx, _) = broadcast::channel(1024);
         Self {
             tx,
-            settings: Arc::new(RwLock::new(PlotSettings { 
+            settings: Arc::new(RwLock::new(PlotSettings {
                 scale: 1.0,
                 window_seconds: 90.0,
                 save_pct: 0.7,
@@ -163,11 +173,20 @@ impl WebState {
                 deconvolve: false,
                 units: "counts".to_string(),
                 eq_screenshots: false,
+                show_spectrogram: true,
+                spectrogram_freq_min: 0.0,
+                spectrogram_freq_max: 50.0,
+                spectrogram_log_y: false,
+                filter_waveform: false,
+                filter_highpass: 0.7,
+                filter_lowpass: 2.0,
+                filter_corners: 4,
             })),
             history: Arc::new(Mutex::new(AlertHistoryManager::new())),
             waveform_buffers: Arc::new(Mutex::new(HashMap::new())),
             alert_max_intensities: Arc::new(Mutex::new(HashMap::new())),
             station_name: Arc::new(RwLock::new(String::new())),
+            sensitivity_map: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -271,7 +290,6 @@ pub fn serialize_waveform_packet(
 /// FFT parameters (matches static plot: NFFT=128, 90% overlap, hop=13)
 const NFFT: usize = 128;
 const HOP: usize = 13;
-const NOVERLAP: usize = NFFT - HOP; // 115
 
 /// Hanning window coefficients
 fn hanning_window(n: usize) -> Vec<f64> {
@@ -357,7 +375,7 @@ fn compute_incremental_columns(
         state.running_max = batch_max;
     }
 
-    // Normalize to u8
+    // Normalize to u8 with power scaling (mag_sq ^ 0.1, matching rsudp's sg ** (1/10))
     let norm_max = state.running_max;
     raw_columns.iter().map(|mags| {
         mags.iter().map(|&mag_sq| {
@@ -407,6 +425,42 @@ async fn handle_socket(socket: axum::extract::ws::WebSocket, state: WebState) {
         ).await;
         timeout.unwrap_or(None)
     };
+
+    // Read deconvolution settings once for this connection
+    let (deconvolve, units) = {
+        let settings = state.settings.read().unwrap();
+        (settings.deconvolve, settings.units.clone())
+    };
+    let sens_map = {
+        let sm = state.sensitivity_map.read().unwrap();
+        sm.clone()
+    };
+
+    // Helper: apply deconvolution to samples if enabled
+    let deconvolve_samples = |samples: &[f64], channel_id: &str| -> Vec<f64> {
+        if !deconvolve {
+            return samples.to_vec();
+        }
+        let sensitivity = match sens_map.get(channel_id) {
+            Some(&s) if s > 0.0 => s,
+            _ => return samples.to_vec(),
+        };
+        let extra_divisor = if units.to_uppercase() == "GRAV" { 9.81 } else { 1.0 };
+        samples.iter().map(|&s| s / sensitivity / extra_divisor).collect()
+    };
+
+    // Read filter and spectrogram settings (reactive — re-read periodically in loop)
+    let (mut filter_enabled, mut filter_highpass, mut filter_lowpass, mut filter_corners) = {
+        let s = state.settings.read().unwrap();
+        (s.filter_waveform, s.filter_highpass, s.filter_lowpass, s.filter_corners)
+    };
+    let (mut spec_freq_min, mut spec_freq_max) = {
+        let s = state.settings.read().unwrap();
+        (s.spectrogram_freq_min, s.spectrogram_freq_max)
+    };
+
+    // Per-connection, per-channel bandpass filter state
+    let mut filter_chains: HashMap<String, BiquadChain> = HashMap::new();
 
     // Send backfill data
     let _window_seconds = {
@@ -483,21 +537,38 @@ async fn handle_socket(socket: axum::extract::ws::WebSocket, state: WebState) {
     // Now send backfill data (safe to await)
     let mut backfill_channels = Vec::new();
     for item in &backfill_items {
+        let deconv_samples = deconvolve_samples(&item.samples, &item.channel_id);
+
+        // Apply bandpass filter to backfill waveform if enabled
+        // Use forward-only filter for backfill so the chain state is continuous with live data
+        let filtered_samples = if filter_enabled && filter_highpass > 0.0 && filter_lowpass > filter_highpass {
+            let chain = filter_chains.entry(item.channel_id.clone()).or_insert_with(|| {
+                BiquadChain::bandpass(filter_corners, filter_highpass, filter_lowpass, item.sample_rate)
+            });
+            chain.process_vec(&deconv_samples)
+        } else {
+            deconv_samples.clone()
+        };
+
         let waveform_packet = serialize_waveform_packet(
             &item.channel_id,
             item.timestamp_us,
             item.sample_rate as f32,
-            &item.samples,
+            &filtered_samples,
         );
         if sender.send(Message::Binary(waveform_packet)).await.is_err() {
             return;
         }
 
-        if item.samples.len() >= NFFT {
+        // Use deconvolved (and optionally filtered) samples for spectrogram
+        let spec_input = if filter_enabled { &filtered_samples } else { &deconv_samples };
+
+        if spec_input.len() >= NFFT {
             let hop_duration = HOP as f32 / item.sample_rate as f32;
+            let noverlap = NFFT - HOP;
 
             // Compute raw spectrogram to get global max for normalization
-            let raw_spec = compute_spectrogram(&item.samples, item.sample_rate, NFFT, NOVERLAP);
+            let raw_spec = compute_spectrogram(spec_input, item.sample_rate, NFFT, noverlap);
 
             if !raw_spec.data.is_empty() {
                 // Find global max across all columns
@@ -508,7 +579,7 @@ async fn handle_socket(socket: axum::extract::ws::WebSocket, state: WebState) {
                     }
                 }
 
-                // Normalize to u8 using global max (same as compute_spectrogram_u8)
+                // Normalize to u8 using global max
                 let columns: Vec<Vec<u8>> = raw_spec.data.iter().map(|row| {
                     row.iter().map(|&mag_sq| {
                         let normalized = (mag_sq / max_mag_sq).powf(0.1);
@@ -535,13 +606,12 @@ async fn handle_socket(socket: axum::extract::ws::WebSocket, state: WebState) {
                 }
 
                 // Initialize FFT state with carry buffer AND backfill's global max
-                // This bridges the normalization between backfill and live data
                 let num_cols = raw_spec.data.len();
                 let carry_start = num_cols * HOP;
                 fft_states.entry(item.channel_id.clone()).or_insert_with(|| {
                     FftChannelState {
-                        carry_buf: if carry_start < item.samples.len() {
-                            item.samples[carry_start..].to_vec()
+                        carry_buf: if carry_start < spec_input.len() {
+                            spec_input[carry_start..].to_vec()
                         } else {
                             Vec::new()
                         },
@@ -564,60 +634,139 @@ async fn handle_socket(socket: axum::extract::ws::WebSocket, state: WebState) {
     }
     debug!("Backfill complete for {} channels", backfill_channels.len());
 
-    while let Ok(msg) = rx.recv().await {
-        match &msg {
-            WsMessage::Waveform { channel, timestamp, samples } => {
-                let timestamp_us = timestamp.timestamp_micros();
-                let sample_rate = {
-                    let buffers = state.waveform_buffers.lock().unwrap();
-                    buffers.get(channel).map(|b| b.sample_rate).unwrap_or(100.0)
-                };
+    // Server-side ping keepalive every 30 seconds
+    let mut ping_interval = tokio::time::interval(std::time::Duration::from_secs(30));
+    ping_interval.tick().await;
 
-                // Send waveform binary packet
-                let waveform_packet = serialize_waveform_packet(
-                    channel,
-                    timestamp_us,
-                    sample_rate as f32,
-                    samples,
-                );
-                if sender.send(Message::Binary(waveform_packet)).await.is_err() {
+    // Settings reactivity: check for changes every 2 seconds
+    let mut settings_check_interval = tokio::time::interval(std::time::Duration::from_secs(2));
+    settings_check_interval.tick().await;
+
+    loop {
+        tokio::select! {
+            result = rx.recv() => {
+                let msg = match result {
+                    Ok(msg) => msg,
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        warn!("WebSocket client lagged, skipped {} messages", n);
+                        continue;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                };
+                match &msg {
+                    WsMessage::Waveform { channel, timestamp, samples } => {
+                        let timestamp_us = timestamp.timestamp_micros();
+                        let sample_rate = {
+                            let buffers = state.waveform_buffers.lock().unwrap();
+                            buffers.get(channel).map(|b| b.sample_rate).unwrap_or(100.0)
+                        };
+
+                        // Deconvolve
+                        let deconv_samples = deconvolve_samples(samples, channel);
+
+                        // Apply bandpass filter if enabled
+                        let filtered_samples = if filter_enabled && filter_highpass > 0.0 && filter_lowpass > filter_highpass {
+                            let chain = filter_chains.entry(channel.clone()).or_insert_with(|| {
+                                BiquadChain::bandpass(filter_corners, filter_highpass, filter_lowpass, sample_rate)
+                            });
+                            chain.process_vec(&deconv_samples)
+                        } else {
+                            deconv_samples.clone()
+                        };
+
+                        let waveform_packet = serialize_waveform_packet(
+                            channel,
+                            timestamp_us,
+                            sample_rate as f32,
+                            &filtered_samples,
+                        );
+                        if sender.send(Message::Binary(waveform_packet)).await.is_err() {
+                            break;
+                        }
+
+                        // Compute incremental spectrogram columns (sliding window)
+                        let spec_input = if filter_enabled { &filtered_samples } else { &deconv_samples };
+                        let fft_state = fft_states.entry(channel.clone()).or_insert_with(FftChannelState::new);
+                        let new_columns = compute_incremental_columns(fft_state, spec_input, &hann, &fft);
+
+                        if !new_columns.is_empty() {
+                            let hop_duration = HOP as f32 / sample_rate as f32;
+                            let new_spec = SpectrogramU8 {
+                                frequency_bins: NFFT / 2 + 1,
+                                sample_rate,
+                                columns: new_columns,
+                                timestamps: Vec::new(),
+                            };
+                            let spec_packet = serialize_spectrogram_packet(
+                                channel,
+                                timestamp_us,
+                                sample_rate as f32,
+                                hop_duration,
+                                &new_spec,
+                            );
+                            if sender.send(Message::Binary(spec_packet)).await.is_err() {
+                                break;
+                            }
+                        }
+                    },
+                    WsMessage::Spectrogram { .. } => {
+                        // Spectrogram messages are generated per-connection, not forwarded
+                    },
+                    _ => {
+                        // Send text-based messages as JSON
+                        if let Ok(json) = serde_json::to_string(&msg) {
+                            if sender.send(Message::Text(json)).await.is_err() {
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            // Poll the WebSocket receiver to process control frames (Ping/Close)
+            ws_msg = receiver.next() => {
+                match ws_msg {
+                    Some(Ok(Message::Ping(data))) => {
+                        if sender.send(Message::Pong(data)).await.is_err() {
+                            break;
+                        }
+                    }
+                    Some(Ok(Message::Close(_))) | None => {
+                        debug!("WebSocket client disconnected");
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+            // Send periodic ping to keep connection alive
+            _ = ping_interval.tick() => {
+                if sender.send(Message::Ping(vec![])).await.is_err() {
                     break;
                 }
+            }
+            // Check for settings changes (filter, spectrogram range)
+            _ = settings_check_interval.tick() => {
+                let (new_fe, new_hp, new_lp, new_fc, new_fmin, new_fmax) = {
+                    let s = state.settings.read().unwrap();
+                    (s.filter_waveform, s.filter_highpass, s.filter_lowpass,
+                     s.filter_corners, s.spectrogram_freq_min, s.spectrogram_freq_max)
+                };
 
-                // Compute incremental spectrogram columns (sliding window)
-                let fft_state = fft_states.entry(channel.clone()).or_insert_with(FftChannelState::new);
-                let new_columns = compute_incremental_columns(fft_state, samples, &hann, &fft);
+                // Filter settings changed — reset filter chains
+                if new_fe != filter_enabled || new_hp != filter_highpass
+                    || new_lp != filter_lowpass || new_fc != filter_corners
+                {
+                    filter_enabled = new_fe;
+                    filter_highpass = new_hp;
+                    filter_lowpass = new_lp;
+                    filter_corners = new_fc;
+                    filter_chains.clear();
+                    // Also reset FFT states since input data characteristics changed
+                    fft_states.clear();
+                }
 
-                if !new_columns.is_empty() {
-                    let hop_duration = HOP as f32 / sample_rate as f32;
-                    let new_spec = SpectrogramU8 {
-                        frequency_bins: NFFT / 2 + 1,
-                        sample_rate,
-                        columns: new_columns,
-                        timestamps: Vec::new(),
-                    };
-                    let spec_packet = serialize_spectrogram_packet(
-                        channel,
-                        timestamp_us,
-                        sample_rate as f32,
-                        hop_duration,
-                        &new_spec,
-                    );
-                    if sender.send(Message::Binary(spec_packet)).await.is_err() {
-                        break;
-                    }
-                }
-            },
-            WsMessage::Spectrogram { .. } => {
-                // Spectrogram messages are generated per-connection, not forwarded
-            },
-            _ => {
-                // Send text-based messages as JSON
-                if let Ok(json) = serde_json::to_string(&msg) {
-                    if sender.send(Message::Text(json)).await.is_err() {
-                        break;
-                    }
-                }
+                // Update spectrogram freq range tracking (for future use)
+                spec_freq_min = new_fmin;
+                spec_freq_max = new_fmax;
             }
         }
     }

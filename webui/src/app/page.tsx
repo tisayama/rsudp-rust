@@ -22,6 +22,11 @@ const DEFAULT_SETTINGS: PlotSettings = {
   spectrogram_freq_min: 0,
   spectrogram_freq_max: 50,
   spectrogram_log_y: false,
+  deconvolve: false,
+  filter_waveform: false,
+  filter_highpass: 0.7,
+  filter_lowpass: 2.0,
+  filter_corners: 4,
 };
 
 function channelSortKey(ch: string): [number, string] {
@@ -37,6 +42,7 @@ interface SpectrogramState {
   sampleRate: number;
   hopDuration: number;
   totalReceived: number;
+  firstColumnTimestamp: number;
 }
 
 export default function Home() {
@@ -57,6 +63,7 @@ export default function Home() {
   });
 
   const [channelTimestamps, setChannelTimestamps] = useState<Record<string, Date>>({});
+  const [globalLatestTimestamp, setGlobalLatestTimestamp] = useState<Date | null>(null);
 
   const buffersRef = useRef<Record<string, RingBuffer>>({});
   const spectrogramRef = useRef<Record<string, SpectrogramState>>({});
@@ -64,6 +71,7 @@ export default function Home() {
   const fadeoutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleSpectrogramData = useCallback((
+    batchTimestamp: number,
     channelId: string,
     columns: Uint8Array[],
     frequencyBins: number,
@@ -71,14 +79,27 @@ export default function Home() {
     hopDuration: number,
   ) => {
     const prev = spectrogramRef.current[channelId];
-    const existingCols = prev?.columns || [];
+
+    // If frequencyBins changed (adaptive NFFT), discard old columns to avoid mixed-resolution data
+    const binsChanged = prev && prev.frequencyBins !== frequencyBins;
+    const existingCols = binsChanged ? [] : (prev?.columns || []);
     const updatedCols = [...existingCols, ...columns];
+
+    // Track firstColumnTimestamp (reset if bins changed or first batch)
+    // Backend sends timestamp of the first column CENTER, so use directly
+    let firstColumnTimestamp = binsChanged ? 0 : (prev?.firstColumnTimestamp || 0);
+    if (existingCols.length === 0) {
+      firstColumnTimestamp = batchTimestamp;
+    }
 
     // Keep enough columns for max window (300s at ~7.7 cols/sec ≈ 2300)
     const maxCols = 3000;
-    const trimmed = updatedCols.length > maxCols
-      ? updatedCols.slice(updatedCols.length - maxCols)
-      : updatedCols;
+    let trimmed = updatedCols;
+    if (updatedCols.length > maxCols) {
+      const trimCount = updatedCols.length - maxCols;
+      trimmed = updatedCols.slice(trimCount);
+      firstColumnTimestamp += trimCount * hopDuration * 1000;
+    }
 
     spectrogramRef.current[channelId] = {
       columns: trimmed,
@@ -86,6 +107,7 @@ export default function Home() {
       sampleRate,
       hopDuration,
       totalReceived: (prev?.totalReceived || 0) + columns.length,
+      firstColumnTimestamp,
     };
     setSpectrogramData({ ...spectrogramRef.current });
   }, []);
@@ -148,9 +170,19 @@ export default function Home() {
       buffersRef.current[channel_id].pushMany(samples);
 
       // Track latest timestamp for absolute time axis
-      const latestTs = new Date(Date.parse(timestamp) + (samples.length / sample_rate) * 1000);
+      // N samples span (N-1) intervals: last sample time = first sample time + (N-1)/sampleRate
+      const latestTs = new Date(Date.parse(timestamp) + ((samples.length - 1) / sample_rate) * 1000);
       channelTimestampsRef.current[channel_id] = latestTs;
       setChannelTimestamps({ ...channelTimestampsRef.current });
+
+      // Compute globalLatestTimestamp (max across all channels)
+      let maxTs: Date | null = null;
+      for (const ts of Object.values(channelTimestampsRef.current)) {
+        if (!maxTs || ts.getTime() > maxTs.getTime()) {
+          maxTs = ts;
+        }
+      }
+      setGlobalLatestTimestamp(maxTs);
     } else if (lastMessage.type === 'AlertStart') {
       const { channel, timestamp } = lastMessage.data;
       setVisualAlerts(prev => [...prev, { type: 'Alarm' as const, channel, timestamp }].slice(-50));
@@ -258,8 +290,10 @@ export default function Home() {
                     alerts={visualAlerts}
                     settings={settings}
                     isBottomChannel={idx === sortedChannels.length - 1}
-                    units="CHAN"
-                    latestTimestamp={channelTimestamps[id] || null}
+                    units={settings.deconvolve ? "CHAN" : "COUNTS"}
+                    latestTimestamp={globalLatestTimestamp}
+                    channelLatestTimestamp={channelTimestamps[id] || null}
+                    spectrogramFirstColumnTimestamp={spectrogramData[id]?.firstColumnTimestamp || 0}
                   />
                 );
               })

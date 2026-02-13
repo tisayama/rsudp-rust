@@ -72,6 +72,66 @@ const ControlPanel: React.FC<ControlPanelProps> = ({ settings, onSettingsChange,
         </button>
       </div>
 
+      {/* Bandpass Filter Controls */}
+      <div className="border-t border-gray-700 pt-4 mt-4">
+        <h3 className="text-sm font-bold text-gray-300 mb-3">Bandpass Filter</h3>
+
+        <div className="flex items-center justify-between mb-4">
+          <label className="text-sm font-semibold text-gray-400">Filter Waveform</label>
+          <button
+            onClick={() => onSettingsChange({ ...settings, filter_waveform: !settings.filter_waveform })}
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${
+              settings.filter_waveform ? 'bg-blue-600' : 'bg-gray-600'
+            }`}
+          >
+            <span
+              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                settings.filter_waveform ? 'translate-x-6' : 'translate-x-1'
+              }`}
+            />
+          </button>
+        </div>
+
+        {settings.filter_waveform && (
+          <>
+            <div className="mb-4">
+              <label className="block text-xs font-semibold text-gray-400 mb-1">
+                Highpass: {settings.filter_highpass} Hz
+              </label>
+              <input
+                type="number"
+                min="0.01"
+                max={settings.filter_lowpass - 0.01}
+                step="0.1"
+                value={settings.filter_highpass}
+                onChange={(e) => {
+                  const v = parseFloat(e.target.value);
+                  if (!isNaN(v) && v > 0) onSettingsChange({ ...settings, filter_highpass: v });
+                }}
+                className="w-full px-2 py-1 bg-[#202530] border border-gray-600 rounded text-gray-300 text-sm"
+              />
+            </div>
+            <div className="mb-4">
+              <label className="block text-xs font-semibold text-gray-400 mb-1">
+                Lowpass: {settings.filter_lowpass} Hz
+              </label>
+              <input
+                type="number"
+                min={settings.filter_highpass + 0.01}
+                max="49"
+                step="0.1"
+                value={settings.filter_lowpass}
+                onChange={(e) => {
+                  const v = parseFloat(e.target.value);
+                  if (!isNaN(v) && v > settings.filter_highpass) onSettingsChange({ ...settings, filter_lowpass: v });
+                }}
+                className="w-full px-2 py-1 bg-[#202530] border border-gray-600 rounded text-gray-300 text-sm"
+              />
+            </div>
+          </>
+        )}
+      </div>
+
       {/* Spectrogram Controls */}
       <div className="border-t border-gray-700 pt-4 mt-4">
         <h3 className="text-sm font-bold text-gray-300 mb-3">Spectrogram</h3>

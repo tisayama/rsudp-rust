@@ -56,6 +56,8 @@ Auto-generated from all feature plans. Last updated: 2025-12-19
 - In-memory ring buffers (server-side `VecDeque`, client-side `Float32Array`) (036-webui-spectrogram)
 - TypeScript (Next.js 14+) for frontend; Rust backend unchanged + Next.js, React, Tailwind CSS (all existing) (037-webui-plot-polish)
 - N/A (UI-only changes) (037-webui-plot-polish)
+- Rust 1.7x (Backend), TypeScript / Next.js 14+ (Frontend) + `axum` (REST API), `tokio` (async), `serde` (serialization); React, Canvas 2D API (frontend) (038-webui-scroll-bandpass)
+- In-memory (RingBuffer for waveform, array for spectrogram columns) (038-webui-scroll-bandpass)
 
 - Rust 1.7x (latest stable) + None (requires Rust toolchain: `rustc`, `cargo`) (001-init-rust-project)
 
@@ -75,8 +77,8 @@ cargo test [ONLY COMMANDS FOR ACTIVE TECHNOLOGIES][ONLY COMMANDS FOR ACTIVE TECH
 Rust 1.7x (latest stable): Follow standard conventions
 
 ## Recent Changes
+- 038-webui-scroll-bandpass: Added Rust 1.7x (Backend), TypeScript / Next.js 14+ (Frontend) + `axum` (REST API), `tokio` (async), `serde` (serialization); React, Canvas 2D API (frontend)
 - 037-webui-plot-polish: Added TypeScript (Next.js 14+) for frontend; Rust backend unchanged + Next.js, React, Tailwind CSS (all existing)
-- 036-webui-spectrogram: Added Rust 1.7x (Edition 2021) + TypeScript 5 / Next.js 14.2
 - 036-webui-spectrogram: Added Rust 1.7x (Edition 2021) + TypeScript 5 / Next.js 14.2
 
 
