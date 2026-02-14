@@ -58,6 +58,8 @@ Auto-generated from all feature plans. Last updated: 2025-12-19
 - N/A (UI-only changes) (037-webui-plot-polish)
 - Rust 1.7x (Backend), TypeScript / Next.js 14+ (Frontend) + `axum` (REST API), `tokio` (async), `serde` (serialization); React, Canvas 2D API (frontend) (038-webui-scroll-bandpass)
 - In-memory (RingBuffer for waveform, array for spectrogram columns) (038-webui-scroll-bandpass)
+- Rust 1.7x (Edition 2021) + `rustfft` (FFT computation), `axum` (WebSocket), `tokio` (async) (039-fix-spectrogram-sensitivity)
+- In-memory (ring buffer, carry buffer for incremental FFT) (039-fix-spectrogram-sensitivity)
 
 - Rust 1.7x (latest stable) + None (requires Rust toolchain: `rustc`, `cargo`) (001-init-rust-project)
 
@@ -77,9 +79,9 @@ cargo test [ONLY COMMANDS FOR ACTIVE TECHNOLOGIES][ONLY COMMANDS FOR ACTIVE TECH
 Rust 1.7x (latest stable): Follow standard conventions
 
 ## Recent Changes
+- 039-fix-spectrogram-sensitivity: Added Rust 1.7x (Edition 2021) + `rustfft` (FFT computation), `axum` (WebSocket), `tokio` (async)
 - 038-webui-scroll-bandpass: Added Rust 1.7x (Backend), TypeScript / Next.js 14+ (Frontend) + `axum` (REST API), `tokio` (async), `serde` (serialization); React, Canvas 2D API (frontend)
 - 037-webui-plot-polish: Added TypeScript (Next.js 14+) for frontend; Rust backend unchanged + Next.js, React, Tailwind CSS (all existing)
-- 036-webui-spectrogram: Added Rust 1.7x (Edition 2021) + TypeScript 5 / Next.js 14.2
 
 
 <!-- MANUAL ADDITIONS START -->

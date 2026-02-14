@@ -49,7 +49,7 @@ export interface AlertSettings {
 }
 
 export interface SpectrogramColumn {
-  data: Uint8Array;
+  data: Float32Array;
   timestamp: number; // microseconds since epoch
   frequencyBins: number;
 }
@@ -60,7 +60,7 @@ export interface SpectrogramPacket {
   sampleRate: number;
   frequencyBins: number;
   columnsCount: number;
-  columns: Uint8Array[];
+  columns: Float32Array[];
 }
 
 export interface IntensityIndicatorState {

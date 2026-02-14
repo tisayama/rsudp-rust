@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { WsMessage, SpectrogramPacket } from '../lib/types';
 
 export interface UseWebSocketOptions {
-  onSpectrogramData?: (batchTimestamp: number, channelId: string, columns: Uint8Array[], frequencyBins: number, sampleRate: number, hopDuration: number) => void;
+  onSpectrogramData?: (batchTimestamp: number, channelId: string, columns: Float32Array[], frequencyBins: number, sampleRate: number, hopDuration: number) => void;
 }
 
 export const useWebSocket = (url: string, options?: UseWebSocketOptions) => {
@@ -79,8 +79,8 @@ export const useWebSocket = (url: string, options?: UseWebSocketOptions) => {
               sample_rate: sampleRate,
             }
           });
-        } else if (type === 0x03) {
-          // Spectrogram binary packet
+        } else if (type === 0x04) {
+          // Spectrogram f32 binary packet (raw compressed PSD values)
           let offset = 1;
           const channelIdLen = view.getUint8(offset);
           offset += 1;
@@ -99,11 +99,11 @@ export const useWebSocket = (url: string, options?: UseWebSocketOptions) => {
           const columnsCount = view.getUint16(offset, true);
           offset += 2;
 
-          // Extract columns (column-major: each column has frequencyBins u8 values)
-          const columns: Uint8Array[] = [];
+          // Extract columns (column-major: each column has frequencyBins f32 values)
+          const columns: Float32Array[] = [];
           for (let col = 0; col < columnsCount; col++) {
-            const colStart = offset + col * frequencyBins;
-            const colData = new Uint8Array(event.data.slice(colStart, colStart + frequencyBins));
+            const colStart = offset + col * frequencyBins * 4; // f32 = 4 bytes
+            const colData = new Float32Array(event.data.slice(colStart, colStart + frequencyBins * 4));
             columns.push(colData);
           }
 

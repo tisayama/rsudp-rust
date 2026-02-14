@@ -11,7 +11,7 @@ import { drawSimplifiedPath } from '../lib/path-simplifier';
 interface ChannelPairCanvasProps {
   channelId: string;
   buffer: RingBuffer;
-  spectrogramColumns: Uint8Array[];
+  spectrogramColumns: Float32Array[];
   frequencyBins: number;
   sampleRate: number;
   hopDuration: number;
@@ -78,7 +78,7 @@ const ChannelPairCanvas: React.FC<ChannelPairCanvasProps> = ({
   const spectrogramCanvasRef = useRef<HTMLCanvasElement>(null);
 
   // Use refs for data that changes frequently to avoid recreating the interval
-  const spectrogramColumnsRef = useRef<Uint8Array[]>([]);
+  const spectrogramColumnsRef = useRef<Float32Array[]>([]);
   const hopDurationRef = useRef(0.13);
   const frequencyBinsRef = useRef(65);
   spectrogramColumnsRef.current = spectrogramColumns;
@@ -348,21 +348,44 @@ const ChannelPairCanvas: React.FC<ChannelPairCanvasProps> = ({
                 binLookup[y] = Math.max(0, Math.min(fBins - 1, bin));
               }
 
-              // Column-driven rendering with timestamp-based positioning
+              // Right-align spectrogram with waveform: shift all columns so the last
+              // column's right edge aligns with rightEdge. The carry_buf delay (~NFFT samples)
+              // means spectrogram data lags behind the waveform; this shift compensates visually.
+              // The left side may have a small empty margin, extending the effective display period.
+              const lastColRightEdge = firstColTs + cols.length * hd * 1000;
+              const specShift = rightEdge - lastColRightEdge;
+
+              // Per-frame min-max normalization across ALL visible columns
+              // Matches rsudp/matplotlib's imshow() auto-scaling: Normalize(vmin=data.min(), vmax=data.max())
+              const shiftedLeftEdge = leftEdge - specShift;
+              const firstVisibleIdx = Math.max(0, Math.floor((shiftedLeftEdge - firstColTs) / (hd * 1000)));
+              let frameMin = Infinity;
+              let frameMax = -Infinity;
+              for (let ci = firstVisibleIdx; ci < cols.length; ci++) {
+                const colTime = firstColTs + ci * hd * 1000 + specShift;
+                if (colTime > rightEdge) break;
+                const col = cols[ci];
+                if (!col || col.length !== fBins) continue;
+                for (let i = 0; i < col.length; i++) {
+                  const v = col[i];
+                  if (v < frameMin) frameMin = v;
+                  if (v > frameMax) frameMax = v;
+                }
+              }
+              const frameRange = frameMax > frameMin ? frameMax - frameMin : 1;
+
+              // Column-driven rendering with right-aligned positioning
               const imageData = sCtx.createImageData(plotWidth, spectrogramHeight);
               const pixels = imageData.data;
 
-              // Skip columns before visible window
-              const firstVisibleIdx = Math.max(0, Math.floor((leftEdge - firstColTs) / (hd * 1000)));
-
               for (let ci = firstVisibleIdx; ci < cols.length; ci++) {
-                const colTime = firstColTs + ci * hd * 1000;
+                const colTime = firstColTs + ci * hd * 1000 + specShift;
                 if (colTime > rightEdge) break;
 
                 const col = cols[ci];
                 if (!col || col.length !== fBins) continue;
 
-                // Compute pixel x range for this column
+                // Compute pixel x range for this column (shifted)
                 const x = Math.round(((colTime - leftEdge) / (windowSeconds * 1000)) * plotWidth);
                 const nextColTime = colTime + hd * 1000;
                 const nextX = Math.round(((nextColTime - leftEdge) / (windowSeconds * 1000)) * plotWidth);
@@ -371,9 +394,11 @@ const ChannelPairCanvas: React.FC<ChannelPairCanvasProps> = ({
 
                 for (let px = xStart; px < xEnd; px++) {
                   for (let y = 0; y < spectrogramHeight; y++) {
-                    const value = col[binLookup[y]];
-                    const clampedIdx = Math.max(0, Math.min(INFERNO_RGB.length - 1, value));
-                    const [r, g, b] = INFERNO_RGB[clampedIdx];
+                    const rawVal = col[binLookup[y]];
+                    // Min-max normalization → 0-255 colormap index
+                    const normalized = (rawVal - frameMin) / frameRange;
+                    const value = Math.round(Math.max(0, Math.min(255, normalized * 255)));
+                    const [r, g, b] = INFERNO_RGB[value];
                     const pixelOffset = (y * plotWidth + px) * 4;
                     pixels[pixelOffset] = r;
                     pixels[pixelOffset + 1] = g;

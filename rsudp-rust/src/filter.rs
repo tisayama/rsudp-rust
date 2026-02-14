@@ -1,4 +1,6 @@
 use crate::trigger::Biquad;
+use crate::parser::stationxml::ChannelResponse;
+use rustfft::{FftPlanner, num_complex::Complex};
 use std::f64::consts::PI;
 
 /// Compute Butterworth bandpass filter as cascaded second-order sections (SOS)
@@ -21,9 +23,13 @@ pub fn butter_bandpass_sos(order: usize, low_freq: f64, high_freq: f64, fs: f64)
 
     // Step 2: Analog Butterworth lowpass prototype poles (left half-plane only)
     // For order N, poles are at: s_k = exp(j * pi * (2k + N + 1) / (2N))
+    // Poles come in conjugate pairs: k and (N-1-k). We only process unique poles
+    // (the upper half-plane ones) to avoid duplicating biquad sections.
+    // For even N: N/2 unique pairs. For odd N: (N-1)/2 pairs + 1 real pole.
     let mut sections = Vec::new();
 
-    for k in 0..order {
+    let n_unique = (order + 1) / 2; // ceil(order/2)
+    for k in 0..n_unique {
         let theta = PI * (2 * k + order + 1) as f64 / (2 * order) as f64;
         let p_re = theta.cos();
         let p_im = theta.sin();
@@ -56,8 +62,7 @@ pub fn butter_bandpass_sos(order: usize, low_freq: f64, high_freq: f64, fs: f64)
         let s2_im = (pbw_im - sqrt_disc_im) / 2.0;
 
         // Step 4: Bilinear transform each pole pair into a digital biquad section
-        // For pole s1: z-domain pole at z = (1 + s/(2*fs)) / (1 - s/(2*fs))
-        // We form two 2nd-order sections, one for each conjugate pair
+        // Each unique prototype pole generates two biquad sections (one per bandpass pole pair).
 
         // Section for pole s1 (and its conjugate s1*)
         let bq1 = analog_pole_pair_to_biquad(s1_re, s1_im, omega_0, fs);
@@ -229,6 +234,270 @@ impl BiquadChain {
     }
 }
 
+/// Evaluate the instrument response at a given angular frequency (rad/s).
+/// Returns a complex value: H(jw) = A0 * product(jw - z_i) / product(jw - p_j)
+fn evaluate_response_at(response: &ChannelResponse, omega: f64) -> Complex<f64> {
+    let jw = Complex::new(0.0, omega);
+
+    let mut numerator = Complex::new(response.normalization_factor, 0.0);
+    for &(re, im) in &response.zeros {
+        numerator *= jw - Complex::new(re, im);
+    }
+
+    let mut denominator = Complex::new(1.0, 0.0);
+    for &(re, im) in &response.poles {
+        denominator *= jw - Complex::new(re, im);
+    }
+
+    if denominator.norm() < 1e-30 {
+        return Complex::new(0.0, 0.0);
+    }
+
+    (numerator / denominator) * response.stage_gain
+}
+
+/// Compute the cosine taper weight for the pre-filter at a given frequency.
+/// pre_filt = [f1, f2, f3, f4]:
+///   - below f1: 0.0
+///   - f1 to f2: cosine taper 0 → 1
+///   - f2 to f3: 1.0 (passband)
+///   - f3 to f4: cosine taper 1 → 0
+///   - above f4: 0.0
+fn pre_filter_weight(freq: f64, pre_filt: &[f64; 4]) -> f64 {
+    if freq <= pre_filt[0] || freq >= pre_filt[3] {
+        0.0
+    } else if freq < pre_filt[1] {
+        let t = (freq - pre_filt[0]) / (pre_filt[1] - pre_filt[0]);
+        0.5 * (1.0 - (PI * t).cos())
+    } else if freq <= pre_filt[2] {
+        1.0
+    } else {
+        let t = (freq - pre_filt[2]) / (pre_filt[3] - pre_filt[2]);
+        0.5 * (1.0 + (PI * t).cos())
+    }
+}
+
+/// Apply frequency-domain deconvolution to a batch of samples.
+/// This matches obspy's `Trace.remove_response()` with output='VEL'.
+///
+/// - `samples`: raw ADC counts (f64)
+/// - `response`: instrument response (poles/zeros)
+/// - `sample_rate`: samples per second
+/// - `pre_filt`: [f1, f2, f3, f4] Hz — cosine taper to avoid low/high frequency blowup
+/// - `water_level_db`: minimum response level in dB (relative to max) to prevent division by near-zero
+///
+/// Returns deconvolved samples in physical units (m/s for velocity instruments).
+pub fn deconvolve_response(
+    samples: &[f64],
+    response: &ChannelResponse,
+    sample_rate: f64,
+    pre_filt: [f64; 4],
+    water_level_db: f64,
+) -> Vec<f64> {
+    let n = samples.len();
+    if n == 0 || response.poles.is_empty() {
+        // No response data — fall back to simple sensitivity division
+        if response.sensitivity > 0.0 {
+            return samples.iter().map(|&s| s / response.sensitivity).collect();
+        }
+        return samples.to_vec();
+    }
+
+    // Pad to at least 2*n to prevent circular convolution wrap-around,
+    // matching obspy's _npts2nfft(). Then round to next power of 2 for FFT efficiency.
+    let nfft = (2 * n).next_power_of_two().max(512);
+
+    // Prepare FFT input: mean-removed signal + zero-padding
+    let mean = samples.iter().sum::<f64>() / n as f64;
+    let mut fft_input: Vec<Complex<f64>> = samples.iter()
+        .map(|&s| Complex::new(s - mean, 0.0))
+        .collect();
+    fft_input.resize(nfft, Complex::new(0.0, 0.0));
+
+    // Forward FFT
+    let mut planner = FftPlanner::new();
+    let fft_forward = planner.plan_fft_forward(nfft);
+    fft_forward.process(&mut fft_input);
+
+    // Compute response at each frequency bin
+    let freq_resolution = sample_rate / nfft as f64;
+    let mut response_values: Vec<Complex<f64>> = Vec::with_capacity(nfft);
+    let mut max_response_mag = 0.0_f64;
+
+    for k in 0..nfft {
+        let freq = if k <= nfft / 2 {
+            k as f64 * freq_resolution
+        } else {
+            (k as f64 - nfft as f64) * freq_resolution
+        };
+        let omega = 2.0 * PI * freq;
+        let r = evaluate_response_at(response, omega);
+        max_response_mag = max_response_mag.max(r.norm());
+        response_values.push(r);
+    }
+
+    // Apply water level: minimum response magnitude in linear scale
+    let water_level_linear = max_response_mag * 10.0_f64.powf(-water_level_db / 20.0);
+
+    // Deconvolve in frequency domain
+    for k in 0..nfft {
+        let freq = if k <= nfft / 2 {
+            k as f64 * freq_resolution
+        } else {
+            (k as f64 - nfft as f64) * freq_resolution
+        };
+        let abs_freq = freq.abs();
+
+        // Pre-filter weight
+        let weight = pre_filter_weight(abs_freq, &pre_filt);
+
+        if weight < 1e-10 {
+            fft_input[k] = Complex::new(0.0, 0.0);
+            continue;
+        }
+
+        let r = response_values[k];
+        let r_mag = r.norm();
+
+        // Apply water level: if response is too small, clip to water level
+        let effective_r = if r_mag < water_level_linear {
+            // Preserve phase, use water_level magnitude
+            if r_mag > 1e-30 {
+                r * (water_level_linear / r_mag)
+            } else {
+                Complex::new(water_level_linear, 0.0)
+            }
+        } else {
+            r
+        };
+
+        // Deconvolve: divide by response, apply pre-filter
+        fft_input[k] = fft_input[k] * weight / effective_r;
+    }
+
+    // Inverse FFT
+    let fft_inverse = planner.plan_fft_inverse(nfft);
+    fft_inverse.process(&mut fft_input);
+
+    // Normalize (rustfft doesn't normalize) and extract real part
+    let scale = 1.0 / nfft as f64;
+    fft_input[..n].iter().map(|c| c.re * scale).collect()
+}
+
+/// Streaming deconvolution state for real-time processing.
+/// Uses overlap-save method to process incoming data in blocks.
+pub struct StreamingDeconvolver {
+    response: ChannelResponse,
+    sample_rate: f64,
+    pre_filt: [f64; 4],
+    water_level_db: f64,
+    /// Accumulated input buffer
+    buffer: Vec<f64>,
+    /// Overlap from previous block (for continuity)
+    overlap: Vec<f64>,
+    /// Minimum block size for FFT processing
+    block_size: usize,
+    /// Overlap size (for smooth transitions between blocks)
+    overlap_size: usize,
+}
+
+impl StreamingDeconvolver {
+    pub fn new(
+        response: ChannelResponse,
+        sample_rate: f64,
+        pre_filt: [f64; 4],
+        water_level_db: f64,
+    ) -> Self {
+        let block_size = 256; // ~2.56 seconds at 100 Hz
+        let overlap_size = 128; // ~1.28 seconds overlap
+        Self {
+            response,
+            sample_rate,
+            pre_filt,
+            water_level_db,
+            buffer: Vec::new(),
+            overlap: Vec::new(),
+            block_size,
+            overlap_size,
+        }
+    }
+
+    /// Add new samples and return any fully deconvolved output.
+    /// Returns (deconvolved_samples, timestamp_offset_samples) where
+    /// timestamp_offset_samples is how many samples from the START of the
+    /// accumulated input correspond to the beginning of the output.
+    pub fn process(&mut self, samples: &[f64]) -> Vec<f64> {
+        self.buffer.extend_from_slice(samples);
+
+        let mut output = Vec::new();
+
+        while self.buffer.len() >= self.block_size {
+            // Build processing segment: overlap + new block
+            let mut segment = Vec::with_capacity(self.overlap_size + self.block_size);
+            segment.extend_from_slice(&self.overlap);
+            segment.extend_from_slice(&self.buffer[..self.block_size]);
+
+            // Deconvolve the full segment
+            let deconv = deconvolve_response(
+                &segment,
+                &self.response,
+                self.sample_rate,
+                self.pre_filt,
+                self.water_level_db,
+            );
+
+            // Keep only the new part (discard overlap region from output)
+            let valid_start = self.overlap.len();
+            if deconv.len() > valid_start {
+                output.extend_from_slice(&deconv[valid_start..]);
+            }
+
+            // Save overlap for next block
+            let new_overlap_start = self.block_size.saturating_sub(self.overlap_size);
+            self.overlap = self.buffer[new_overlap_start..self.block_size].to_vec();
+
+            // Remove processed samples from buffer
+            self.buffer.drain(..self.block_size);
+        }
+
+        output
+    }
+
+    /// Flush remaining buffered samples (for end of stream or settings change).
+    pub fn flush(&mut self) -> Vec<f64> {
+        if self.buffer.is_empty() {
+            return Vec::new();
+        }
+
+        let mut segment = Vec::with_capacity(self.overlap.len() + self.buffer.len());
+        segment.extend_from_slice(&self.overlap);
+        segment.extend_from_slice(&self.buffer);
+
+        let deconv = deconvolve_response(
+            &segment,
+            &self.response,
+            self.sample_rate,
+            self.pre_filt,
+            self.water_level_db,
+        );
+
+        let valid_start = self.overlap.len();
+        self.buffer.clear();
+        self.overlap.clear();
+
+        if deconv.len() > valid_start {
+            deconv[valid_start..].to_vec()
+        } else {
+            Vec::new()
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.buffer.clear();
+        self.overlap.clear();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -237,8 +506,8 @@ mod tests {
     fn test_bandpass_basic_properties() {
         // Order 4, 0.7-2.0 Hz, fs=100
         let sections = butter_bandpass_sos(4, 0.7, 2.0, 100.0);
-        // Bandpass order = 2 * lowpass_order = 8, so 4 biquad sections
-        assert_eq!(sections.len(), 8);
+        // Order 4 bandpass: ceil(4/2) * 2 = 4 biquad sections
+        assert_eq!(sections.len(), 4);
 
         // All poles should be inside unit circle (stable filter)
         for s in &sections {
@@ -350,5 +619,212 @@ mod tests {
             assert_eq!(section.s1, 0.0);
             assert_eq!(section.s2, 0.0);
         }
+    }
+
+    #[test]
+    fn test_evaluate_response_rs4d_ehz() {
+        // RS4D EHZ known response from FDSN
+        let response = ChannelResponse {
+            zeros: vec![(0.0, 0.0), (0.0, 0.0), (0.0, 0.0)],
+            poles: vec![(-1.0, 0.0), (-3.03, 0.0), (-3.03, 0.0), (-666.67, 0.0)],
+            normalization_factor: 673.744,
+            stage_gain: 399_650_000.0,
+            sensitivity: 399_650_000.0,
+        };
+
+        // At reference frequency (5 Hz), |H| should ≈ sensitivity
+        let omega_5hz = 2.0 * PI * 5.0;
+        let h_5hz = evaluate_response_at(&response, omega_5hz);
+        let ratio_5hz = h_5hz.norm() / response.sensitivity;
+        assert!(
+            (ratio_5hz - 1.0).abs() < 0.01,
+            "Response at 5 Hz should be ~sensitivity, got ratio={}",
+            ratio_5hz
+        );
+
+        // At 0.5 Hz, response should be ~50% of sensitivity
+        let omega_05hz = 2.0 * PI * 0.5;
+        let h_05hz = evaluate_response_at(&response, omega_05hz);
+        let ratio_05hz = h_05hz.norm() / response.sensitivity;
+        assert!(
+            (ratio_05hz - 0.5).abs() < 0.05,
+            "Response at 0.5 Hz should be ~50% of sensitivity, got {}",
+            ratio_05hz
+        );
+
+        // At 10 Hz, response should be close to sensitivity
+        let omega_10hz = 2.0 * PI * 10.0;
+        let h_10hz = evaluate_response_at(&response, omega_10hz);
+        let ratio_10hz = h_10hz.norm() / response.sensitivity;
+        assert!(
+            ratio_10hz > 0.99,
+            "Response at 10 Hz should be ~100% of sensitivity, got {}",
+            ratio_10hz
+        );
+    }
+
+    #[test]
+    fn test_deconvolve_response_5hz_sine() {
+        // Test that deconvolution of a 5 Hz sine wave (at reference frequency)
+        // gives values ≈ count / sensitivity
+        let response = ChannelResponse {
+            zeros: vec![(0.0, 0.0), (0.0, 0.0), (0.0, 0.0)],
+            poles: vec![(-1.0, 0.0), (-3.03, 0.0), (-3.03, 0.0), (-666.67, 0.0)],
+            normalization_factor: 673.744,
+            stage_gain: 399_650_000.0,
+            sensitivity: 399_650_000.0,
+        };
+
+        let sample_rate = 100.0;
+        let n = 1000; // 10 seconds
+        let amp = 10000.0; // 10000 counts amplitude
+
+        // Generate 5 Hz sine (at reference frequency, where response is flat)
+        let signal: Vec<f64> = (0..n)
+            .map(|i| amp * (2.0 * PI * 5.0 * i as f64 / sample_rate).sin())
+            .collect();
+
+        let pre_filt = [0.1, 0.6, 0.95 * sample_rate, sample_rate];
+        let deconv = deconvolve_response(&signal, &response, sample_rate, pre_filt, 4.5);
+
+        // Expected amplitude: 10000 / 399650000 ≈ 2.502e-5
+        let expected_amp = amp / response.sensitivity;
+
+        // Measure amplitude in the middle (avoid edge effects)
+        let mid = &deconv[n / 4..3 * n / 4];
+        let max_val = mid.iter().map(|&x| x.abs()).fold(0.0_f64, f64::max);
+
+        let ratio = max_val / expected_amp;
+        assert!(
+            (ratio - 1.0).abs() < 0.15,
+            "At 5 Hz, deconvolved amplitude should match count/sensitivity. Got ratio={}, max={}, expected={}",
+            ratio, max_val, expected_amp
+        );
+    }
+
+    #[test]
+    fn test_deconvolve_response_1hz_boost() {
+        // Test that at 1 Hz, deconvolution gives LARGER values than simple division
+        // because the instrument response is only ~81% of peak at 1 Hz
+        let response = ChannelResponse {
+            zeros: vec![(0.0, 0.0), (0.0, 0.0), (0.0, 0.0)],
+            poles: vec![(-1.0, 0.0), (-3.03, 0.0), (-3.03, 0.0), (-666.67, 0.0)],
+            normalization_factor: 673.744,
+            stage_gain: 399_650_000.0,
+            sensitivity: 399_650_000.0,
+        };
+
+        let sample_rate = 100.0;
+        let n = 2000; // 20 seconds for good resolution at 1 Hz
+        let amp = 10000.0;
+
+        // Generate 1 Hz sine
+        let signal: Vec<f64> = (0..n)
+            .map(|i| amp * (2.0 * PI * 1.0 * i as f64 / sample_rate).sin())
+            .collect();
+
+        let pre_filt = [0.1, 0.6, 0.95 * sample_rate, sample_rate];
+        let deconv = deconvolve_response(&signal, &response, sample_rate, pre_filt, 4.5);
+
+        let simple_amp = amp / response.sensitivity;
+
+        // Measure amplitude in the middle
+        let mid = &deconv[n / 4..3 * n / 4];
+        let max_val = mid.iter().map(|&x| x.abs()).fold(0.0_f64, f64::max);
+
+        // At 1 Hz, the response is ~81% of peak, so deconvolution should give ~1.23x more
+        let boost = max_val / simple_amp;
+        assert!(
+            boost > 1.1 && boost < 1.5,
+            "At 1 Hz, deconvolved amplitude should be ~1.23x simple division. Got boost={}",
+            boost
+        );
+    }
+
+    #[test]
+    fn test_pre_filter_weight() {
+        let pf = [0.1, 0.6, 47.5, 50.0];
+
+        assert_eq!(pre_filter_weight(0.0, &pf), 0.0);
+        assert_eq!(pre_filter_weight(0.05, &pf), 0.0);
+        assert!(pre_filter_weight(0.35, &pf) > 0.0 && pre_filter_weight(0.35, &pf) < 1.0);
+        assert!((pre_filter_weight(1.0, &pf) - 1.0).abs() < 1e-10);
+        assert!((pre_filter_weight(25.0, &pf) - 1.0).abs() < 1e-10);
+        assert!(pre_filter_weight(48.0, &pf) > 0.0 && pre_filter_weight(48.0, &pf) < 1.0);
+        assert_eq!(pre_filter_weight(50.0, &pf), 0.0);
+
+        // With rsudp-style pre_filt [0.1, 0.6, 95, 100], all freqs up to Nyquist pass
+        let pf_rsudp = [0.1, 0.6, 95.0, 100.0];
+        assert!((pre_filter_weight(49.0, &pf_rsudp) - 1.0).abs() < 1e-10);
+        assert!((pre_filter_weight(50.0, &pf_rsudp) - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_deconvolve_spike_peak_preservation() {
+        // Test that a broadband spike's peak is preserved by deconvolution.
+        // Simulate a P-wave-like transient (3-sample Gaussian spike) in a background of noise.
+        let response = ChannelResponse {
+            zeros: vec![(0.0, 0.0), (0.0, 0.0), (0.0, 0.0)],
+            poles: vec![(-1.0, 0.0), (-3.03, 0.0), (-3.03, 0.0), (-666.67, 0.0)],
+            normalization_factor: 673.744,
+            stage_gain: 399_650_000.0,
+            sensitivity: 399_650_000.0,
+        };
+
+        let sample_rate = 100.0;
+        let n = 2000; // 20 seconds
+        let spike_amp = 100000.0; // Large spike in ADC counts
+        let spike_center = n / 2; // Spike at center of window
+
+        // Background: low-amplitude 3 Hz sine + 7 Hz sine (typical microseismic noise)
+        let mut signal: Vec<f64> = (0..n)
+            .map(|i| {
+                let t = i as f64 / sample_rate;
+                500.0 * (2.0 * PI * 3.0 * t).sin() + 300.0 * (2.0 * PI * 7.0 * t).sin()
+            })
+            .collect();
+
+        // Add a broadband spike (Gaussian envelope * high-freq oscillation)
+        for i in 0..20 {
+            let offset = (i as f64 - 10.0) / 3.0;
+            let gaussian = (-0.5 * offset * offset).exp();
+            let osc = (2.0 * PI * 5.0 * i as f64 / sample_rate).sin();
+            signal[spike_center - 10 + i] += spike_amp * gaussian * osc;
+        }
+
+        // Deconvolve with full window (simulating rsudp's approach)
+        let pre_filt = [0.1, 0.6, 0.95 * sample_rate, sample_rate];
+        let deconv_full = deconvolve_response(&signal, &response, sample_rate, pre_filt, 4.5);
+
+        // Deconvolve with 512-sample context (simulating our live approach)
+        let context_start = spike_center.saturating_sub(256);
+        let context_end = (spike_center + 256).min(n);
+        let context = &signal[context_start..context_end];
+        let deconv_context = deconvolve_response(context, &response, sample_rate, pre_filt, 4.5);
+
+        // Find peak in full deconvolution (near spike center)
+        let search_start = spike_center - 50;
+        let search_end = spike_center + 50;
+        let peak_full = deconv_full[search_start..search_end]
+            .iter().map(|&x| x.abs()).fold(0.0_f64, f64::max);
+
+        // Find peak in context deconvolution (adjusted index)
+        let ctx_spike_center = spike_center - context_start;
+        let ctx_search_start = ctx_spike_center.saturating_sub(50);
+        let ctx_search_end = (ctx_spike_center + 50).min(deconv_context.len());
+        let peak_context = deconv_context[ctx_search_start..ctx_search_end]
+            .iter().map(|&x| x.abs()).fold(0.0_f64, f64::max);
+
+        // The context deconvolution should give a peak within 20% of the full deconvolution
+        let ratio = peak_context / peak_full;
+        eprintln!(
+            "Spike peak test: full={:.6e}, context={:.6e}, ratio={:.3}",
+            peak_full, peak_context, ratio
+        );
+        assert!(
+            ratio > 0.8 && ratio < 1.2,
+            "Context-window deconvolution peak should be within 20% of full-window. Got ratio={}",
+            ratio
+        );
     }
 }

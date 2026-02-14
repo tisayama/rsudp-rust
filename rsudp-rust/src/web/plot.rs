@@ -15,45 +15,54 @@ pub struct Spectrogram {
 pub fn compute_spectrogram(samples: &[f64], sample_rate: f64, nfft: usize, noverlap: usize) -> Spectrogram {
     let mut planner = FftPlanner::new();
     let fft = planner.plan_fft_forward(nfft);
-    
+
     let step = nfft - noverlap;
+    let freq_bins = nfft / 2 + 1;
     let mut data = Vec::new();
     let mut times = Vec::new();
-    
+
     // Hanning window
     let window: Vec<f64> = (0..nfft)
         .map(|i| 0.5 * (1.0 - (2.0 * std::f64::consts::PI * i as f64 / (nfft - 1) as f64).cos()))
         .collect();
+
+    // PSD normalization factor: Fs × Σ(window²)
+    let window_power_sum: f64 = window.iter().map(|w| w * w).sum();
+    let psd_norm = sample_rate * window_power_sum;
 
     let time_offset = (nfft as f64 / 2.0) / sample_rate;
 
     for i in (0..samples.len().saturating_sub(nfft)).step_by(step) {
         let chunk = &samples[i..i + nfft];
         if chunk.len() < nfft { break; }
-        
+
         let mean = chunk.iter().sum::<f64>() / nfft as f64;
-        
+
         let mut buffer: Vec<Complex<f64>> = chunk.iter().zip(window.iter())
             .map(|(&s, &w)| Complex { re: (s - mean) * w, im: 0.0 })
             .collect();
-            
+
         fft.process(&mut buffer);
-        
-        let psd: Vec<f64> = buffer.iter().take(nfft / 2 + 1)
-            .map(|c| {
+
+        // PSD normalization + one-sided correction (linear PSD, no dB)
+        let psd_linear: Vec<f64> = buffer.iter().take(freq_bins).enumerate()
+            .map(|(k, c)| {
                 let mag_sq = c.re * c.re + c.im * c.im;
-                mag_sq
+                let mut psd = mag_sq / psd_norm;
+                // One-sided spectrum: double non-DC, non-Nyquist bins
+                if k > 0 && k < freq_bins - 1 { psd *= 2.0; }
+                psd
             })
             .collect();
-            
-        data.push(psd);
+
+        data.push(psd_linear);
         times.push((i as f64 / sample_rate) + time_offset);
     }
-    
-    let frequencies: Vec<f64> = (0..nfft / 2 + 1)
+
+    let frequencies: Vec<f64> = (0..freq_bins)
         .map(|i| i as f64 * sample_rate / nfft as f64)
         .collect();
-        
+
     Spectrogram { frequencies, times, data }
 }
 
@@ -79,21 +88,26 @@ pub fn compute_spectrogram_u8(samples: &[f64], sample_rate: f64, nfft: usize, no
         };
     }
 
-    // Find global max for auto-normalization
-    let mut max_mag_sq: f64 = 1e-10;
-    for row in &spec.data {
+    // Compress all values: PSD^0.1 (matching rsudp's sg ** (1/10))
+    let compressed: Vec<Vec<f64>> = spec.data.iter().map(|row| {
+        row.iter().map(|&psd| psd.max(0.0).powf(0.1)).collect()
+    }).collect();
+
+    // Min-max normalization (matching matplotlib's imshow auto-scaling)
+    let mut min_val: f64 = f64::MAX;
+    let mut max_val: f64 = f64::MIN;
+    for row in &compressed {
         for &val in row {
-            if val > max_mag_sq {
-                max_mag_sq = val;
-            }
+            if val < min_val { min_val = val; }
+            if val > max_val { max_val = val; }
         }
     }
+    let range = if max_val > min_val { max_val - min_val } else { 1.0 };
 
-    // Apply power scaling (^1/10) and normalize to 0-255
-    let columns: Vec<Vec<u8>> = spec.data.iter().map(|row| {
-        row.iter().map(|&mag_sq| {
-            let normalized = (mag_sq / max_mag_sq).powf(0.1);
-            (normalized * 255.0).round().min(255.0).max(0.0) as u8
+    let columns: Vec<Vec<u8>> = compressed.iter().map(|row| {
+        row.iter().map(|&val| {
+            let normalized = ((val - min_val) / range).clamp(0.0, 1.0);
+            (normalized * 255.0).round() as u8
         }).collect()
     }).collect();
 
@@ -251,12 +265,19 @@ pub fn draw_rsudp_plot(
         let spec = compute_spectrogram(&samples, sample_rate, nfft, overlap);
         
         if !spec.data.is_empty() {
-            let mut max_mag_sq = 1e-10;
-            for row in &spec.data {
+            // Compress + min-max normalization (matching matplotlib's imshow auto-scaling)
+            let compressed_spec: Vec<Vec<f64>> = spec.data.iter().map(|row| {
+                row.iter().map(|&psd| psd.max(0.0).powf(0.1)).collect()
+            }).collect();
+            let mut spec_min: f64 = f64::MAX;
+            let mut spec_max: f64 = f64::MIN;
+            for row in &compressed_spec {
                 for &val in row {
-                    if val > max_mag_sq { max_mag_sq = val; }
+                    if val < spec_min { spec_min = val; }
+                    if val > spec_max { spec_max = val; }
                 }
             }
+            let spec_range = if spec_max > spec_min { spec_max - spec_min } else { 1.0 };
 
             let mut spec_chart = ChartBuilder::on(&spectrogram_area)
                 .margin_left(20)
@@ -293,8 +314,8 @@ pub fn draw_rsudp_plot(
                 let t_end = t_center + x_step_ms / 2;
 
                 for (f_idx, f) in spec.frequencies.iter().enumerate() {
-                    let mag_sq = spec.data[t_idx][f_idx];
-                    let intensity = (mag_sq / max_mag_sq).powf(0.1);
+                    let val = compressed_spec[t_idx][f_idx];
+                    let intensity = ((val - spec_min) / spec_range).clamp(0.0, 1.0);
                     let lut_idx = (intensity * 255.0) as usize;
                     let plot_color = colormap_lut[lut_idx.min(255)];
 

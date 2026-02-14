@@ -37,7 +37,7 @@ function channelSortKey(ch: string): [number, string] {
 }
 
 interface SpectrogramState {
-  columns: Uint8Array[];
+  columns: Float32Array[];
   frequencyBins: number;
   sampleRate: number;
   hopDuration: number;
@@ -73,7 +73,7 @@ export default function Home() {
   const handleSpectrogramData = useCallback((
     batchTimestamp: number,
     channelId: string,
-    columns: Uint8Array[],
+    columns: Float32Array[],
     frequencyBins: number,
     sampleRate: number,
     hopDuration: number,
@@ -82,15 +82,36 @@ export default function Home() {
 
     // If frequencyBins changed (adaptive NFFT), discard old columns to avoid mixed-resolution data
     const binsChanged = prev && prev.frequencyBins !== frequencyBins;
-    const existingCols = binsChanged ? [] : (prev?.columns || []);
-    const updatedCols = [...existingCols, ...columns];
+    let existingCols = binsChanged ? [] : (prev?.columns || []);
 
     // Track firstColumnTimestamp (reset if bins changed or first batch)
-    // Backend sends timestamp of the first column CENTER, so use directly
+    // Backend sends absolute timestamp of the first column in each batch
     let firstColumnTimestamp = binsChanged ? 0 : (prev?.firstColumnTimestamp || 0);
     if (existingCols.length === 0) {
       firstColumnTimestamp = batchTimestamp;
+    } else {
+      // Gap detection: compare expected vs actual batch timestamp.
+      // If there's a gap (e.g., from packet loss), insert empty columns to maintain
+      // absolute time alignment between spectrogram and waveform.
+      const hopMs = hopDuration * 1000;
+      const expectedNextColTime = firstColumnTimestamp + existingCols.length * hopMs;
+      const drift = batchTimestamp - expectedNextColTime;
+
+      if (drift > hopMs * 1.5) {
+        // Gap detected: insert empty columns to fill the gap
+        const gapCols = Math.round(drift / hopMs);
+        const emptyCol = new Float32Array(frequencyBins); // zeros render as black
+        for (let i = 0; i < gapCols; i++) {
+          existingCols = [...existingCols, emptyCol];
+        }
+      } else if (drift < -hopMs * 1.5) {
+        // Overlap or backward jump: re-anchor to batch timestamp
+        // This can happen after reconnection or settings change
+        firstColumnTimestamp = batchTimestamp - existingCols.length * hopMs;
+      }
     }
+
+    const updatedCols = [...existingCols, ...columns];
 
     // Keep enough columns for max window (300s at ~7.7 cols/sec ≈ 2300)
     const maxCols = 3000;

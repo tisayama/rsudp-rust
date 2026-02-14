@@ -5,7 +5,7 @@ use rsudp_rust::trigger::TriggerConfig;
 use rsudp_rust::intensity::IntensityConfig;
 use rsudp_rust::web::WebState;
 use rsudp_rust::receiver::start_receiver;
-use rsudp_rust::parser::stationxml::fetch_sensitivity;
+use rsudp_rust::parser::stationxml::{fetch_sensitivity, fetch_response};
 use rsudp_rust::parser::mseed::parse_mseed_file;
 use rsudp_rust::settings::Settings;
 use tokio::sync::mpsc;
@@ -149,8 +149,8 @@ async fn main() {
         }
         
         plot_settings.output_dir = settings.settings.output_dir.clone();
-        plot_settings.deconvolve = settings.alert.deconvolve;
-        plot_settings.units = settings.alert.units.clone();
+        plot_settings.deconvolve = settings.plot.deconvolve;
+        plot_settings.units = settings.plot.units.clone();
         plot_settings.show_spectrogram = settings.plot.spectrogram;
         plot_settings.spectrogram_freq_min = settings.plot.lower_limit;
         plot_settings.spectrogram_freq_max = settings.plot.upper_limit;
@@ -199,25 +199,44 @@ async fn main() {
         let mut sn = web_state.station_name.write().unwrap();
         *sn = sta.clone();
     }
-    let sens_map = match fetch_sensitivity(&net, &sta).await {
-        Ok(map) => map,
+    // Fetch full instrument response (poles/zeros) for frequency-domain deconvolution
+    let resp_map = match fetch_response(&net, &sta).await {
+        Ok(map) => {
+            tracing::info!("Fetched instrument response for {} channels", map.len());
+            map
+        }
         Err(e) => {
-            tracing::warn!("Could not fetch StationXML from FDSN: {}. Using default Raspberry Shake sensitivities.", e);
-            let mut fallback = HashMap::new();
-            // Accelerometers (Counts / (m/s^2))
-            fallback.insert("ENE".to_string(), 384500.0);
-            fallback.insert("ENN".to_string(), 384500.0);
-            fallback.insert("ENZ".to_string(), 384500.0);
-            // Geophone (Counts / (m/s)) - Much higher sensitivity
-            fallback.insert("EHZ".to_string(), 399000000.0);
-            fallback
+            tracing::warn!("Could not fetch instrument response from FDSN: {}. Using fallback sensitivities.", e);
+            HashMap::new()
         }
     };
 
-    // Populate sensitivity map in WebState for WebUI deconvolution
+    // Build sensitivity map from response data (or use fallback)
+    let sens_map = if !resp_map.is_empty() {
+        resp_map.iter().map(|(k, v)| (k.clone(), v.sensitivity)).collect()
+    } else {
+        match fetch_sensitivity(&net, &sta).await {
+            Ok(map) => map,
+            Err(e) => {
+                tracing::warn!("Could not fetch StationXML from FDSN: {}. Using default Raspberry Shake sensitivities.", e);
+                let mut fallback = HashMap::new();
+                fallback.insert("ENE".to_string(), 384500.0);
+                fallback.insert("ENN".to_string(), 384500.0);
+                fallback.insert("ENZ".to_string(), 384500.0);
+                fallback.insert("EHZ".to_string(), 399000000.0);
+                fallback
+            }
+        }
+    };
+
+    // Populate maps in WebState for WebUI deconvolution
     {
         let mut sm = web_state.sensitivity_map.write().unwrap();
         *sm = sens_map.clone();
+    }
+    {
+        let mut rm = web_state.response_map.write().unwrap();
+        *rm = resp_map;
     }
 
     // 2. Setup Configs
