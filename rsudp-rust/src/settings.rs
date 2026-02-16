@@ -41,6 +41,8 @@ pub struct Settings {
     pub rsam: RsamSettings,
     #[serde(alias = "HUE")]
     pub hue: HueConfig,
+    #[serde(alias = "PUBSUB")]
+    pub pubsub: PubsubSettings,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -361,6 +363,39 @@ pub struct RsamSettings {
     pub units: String,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "lowercase")]
+pub struct PubsubSettings {
+    #[serde(alias = "ENABLED")]
+    pub enabled: bool,
+    #[serde(alias = "PROJECT_ID")]
+    pub project_id: String,
+    #[serde(alias = "TOPIC")]
+    pub topic: String,
+    #[serde(alias = "SUBSCRIPTION")]
+    pub subscription: String,
+    #[serde(alias = "CREDENTIALS_FILE")]
+    pub credentials_file: Option<String>,
+    #[serde(alias = "INPUT_MODE")]
+    pub input_mode: String,
+    #[serde(alias = "BATCH_INTERVAL_MS")]
+    pub batch_interval_ms: u64,
+}
+
+impl Default for PubsubSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            project_id: "".to_string(),
+            topic: "".to_string(),
+            subscription: "".to_string(),
+            credentials_file: None,
+            input_mode: "udp".to_string(),
+            batch_interval_ms: 500,
+        }
+    }
+}
+
 impl Default for SettingsSection {
     fn default() -> Self {
         Self {
@@ -613,7 +648,7 @@ impl Settings {
         // T009: Detect unknown fields
         if let Ok(table) = config.clone().try_deserialize::<serde_json::Value>() {
             if let Some(map) = table.as_object() {
-                let known_sections = ["settings", "printdata", "write", "plot", "forward", "alert", "alertsound", "custom", "tweets", "telegram", "googlechat", "discord", "sns", "line", "bluesky", "rsam", "hue"];
+                let known_sections = ["settings", "printdata", "write", "plot", "forward", "alert", "alertsound", "custom", "tweets", "telegram", "googlechat", "discord", "sns", "line", "bluesky", "rsam", "hue", "pubsub"];
                 for key in map.keys() {
                     let lower_key = key.to_lowercase();
                     if !known_sections.contains(&lower_key.as_str()) {

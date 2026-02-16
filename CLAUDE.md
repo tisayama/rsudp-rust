@@ -60,6 +60,8 @@ Auto-generated from all feature plans. Last updated: 2025-12-19
 - In-memory (RingBuffer for waveform, array for spectrogram columns) (038-webui-scroll-bandpass)
 - Rust 1.7x (Edition 2021) + `rustfft` (FFT computation), `axum` (WebSocket), `tokio` (async) (039-fix-spectrogram-sensitivity)
 - In-memory (ring buffer, carry buffer for incremental FFT) (039-fix-spectrogram-sensitivity)
+- Rust 1.7x (Edition 2021) + `google-cloud-pubsub` (v0.30+, Pub/Sub クライアント), `prost` (v0.14, Protocol Buffers), `prost-build` (v0.14, ビルド時コード生成), `tokio` (既存, 非同期ランタイム) (040-pubsub-integration)
+- N/A (インメモリバッファリングのみ) (040-pubsub-integration)
 
 - Rust 1.7x (latest stable) + None (requires Rust toolchain: `rustc`, `cargo`) (001-init-rust-project)
 
@@ -79,9 +81,9 @@ cargo test [ONLY COMMANDS FOR ACTIVE TECHNOLOGIES][ONLY COMMANDS FOR ACTIVE TECH
 Rust 1.7x (latest stable): Follow standard conventions
 
 ## Recent Changes
+- 040-pubsub-integration: Added Rust 1.7x (Edition 2021) + `google-cloud-pubsub` (v0.30+, Pub/Sub クライアント), `prost` (v0.14, Protocol Buffers), `prost-build` (v0.14, ビルド時コード生成), `tokio` (既存, 非同期ランタイム)
 - 039-fix-spectrogram-sensitivity: Added Rust 1.7x (Edition 2021) + `rustfft` (FFT computation), `axum` (WebSocket), `tokio` (async)
 - 038-webui-scroll-bandpass: Added Rust 1.7x (Backend), TypeScript / Next.js 14+ (Frontend) + `axum` (REST API), `tokio` (async), `serde` (serialization); React, Canvas 2D API (frontend)
-- 037-webui-plot-polish: Added TypeScript (Next.js 14+) for frontend; Rust backend unchanged + Next.js, React, Tailwind CSS (all existing)
 
 
 <!-- MANUAL ADDITIONS START -->
