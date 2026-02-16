@@ -2,6 +2,7 @@ pub mod filter;
 pub mod forward;
 pub mod hue;
 pub mod intensity;
+pub mod pubsub;
 pub mod rsam;
 pub mod sound;
 pub mod parser;

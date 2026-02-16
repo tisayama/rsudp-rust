@@ -1,0 +1,26 @@
+# rsudp.toml Pub/Sub configuration section example.
+#
+# Add this [pubsub] section to your existing rsudp.toml configuration.
+
+[pubsub]
+# Enable Pub/Sub publisher functionality
+enabled = false
+
+# Google Cloud project ID
+project_id = "my-gcp-project"
+
+# Pub/Sub topic name (publisher publishes to this topic)
+topic = "seismic-data"
+
+# Pub/Sub subscription name (subscriber mode reads from this subscription)
+subscription = "seismic-data-sub"
+
+# Path to service account JSON key file (optional if GOOGLE_APPLICATION_CREDENTIALS is set)
+# credentials_file = "/path/to/service-account.json"
+
+# Input mode: "udp" (default) or "pubsub" (subscriber mode)
+# When "pubsub", UDP receiver is disabled and data comes from the subscription
+input_mode = "udp"
+
+# Batch aggregation window in milliseconds (default: 500)
+batch_interval_ms = 500

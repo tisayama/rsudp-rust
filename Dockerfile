@@ -8,9 +8,11 @@ RUN npm run build
 
 # --- Backend Build Stage ---
 FROM rust:1.82-alpine AS backend-builder
-RUN apk add --no-cache musl-dev
+RUN apk add --no-cache musl-dev protobuf-dev
 WORKDIR /app/rsudp-rust
 COPY rsudp-rust/Cargo*.toml ./
+COPY rsudp-rust/build.rs ./
+COPY rsudp-rust/proto/ ./proto/
 # Dummy build to cache dependencies
 RUN mkdir src && echo "fn main() {}" > src/main.rs && cargo build --release && rm -rf src
 COPY rsudp-rust/src/ ./src/

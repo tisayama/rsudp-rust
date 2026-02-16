@@ -1,7 +1,7 @@
 # Stage 1: Builder
 FROM rust:bookworm AS builder
 
-RUN apt-get update && apt-get install -y clang libclang-dev libasound2-dev && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y clang libclang-dev libasound2-dev protobuf-compiler && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /usr/src/app
 

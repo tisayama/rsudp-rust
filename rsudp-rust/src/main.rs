@@ -14,6 +14,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use rsudp_rust::forward::ForwardManager;
+use rsudp_rust::pubsub;
 use rsudp_rust::rsam::RsamManager;
 use rsudp_rust::web::sns::SNSManager;
 use std::sync::Arc;
@@ -297,7 +298,23 @@ async fn main() {
         None
     };
 
-    // 7. Simulation or Live UDP mode
+    // 7. Initialize Pub/Sub Client (if enabled)
+    let pubsub_client = if settings.pubsub.enabled {
+        match pubsub::create_pubsub_client(&settings.pubsub).await {
+            Ok(client) => {
+                tracing::info!("Pub/Sub client initialized successfully");
+                Some(client)
+            }
+            Err(e) => {
+                tracing::warn!("Pub/Sub initialization failed: {}. Continuing without Pub/Sub.", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    // 8. Simulation or Live UDP mode
     let sm = sens_map.clone();
     let sns = Some(sns_manager.clone());
     let hue = Some(hue_integration.clone());
@@ -313,7 +330,7 @@ async fn main() {
         let fwd_sim = forward_manager.clone();
         let rsam_sim = rsam_manager;
         let pipeline_handle = tokio::spawn(async move {
-            run_pipeline(pipe_rx, trigger_config, intensity_config, ws, sm, sns_sim, hue_sim, audio_sim, sound_sim, fwd_sim, rsam_sim).await;
+            run_pipeline(pipe_rx, trigger_config, intensity_config, ws, sm, sns_sim, hue_sim, audio_sim, sound_sim, fwd_sim, rsam_sim, None).await;
         });
 
         let bytes = std::fs::read(&path).unwrap();
@@ -326,7 +343,7 @@ async fn main() {
         tracing::info!("Simulation complete.");
         return;
     } else {
-        // LIVE UDP MODE
+        // LIVE MODE
         let ws = web_state.clone();
         let sns_live = sns.clone();
         let hue_live = hue.clone();
@@ -334,23 +351,72 @@ async fn main() {
         let sound_live = sound_settings.clone();
         let fwd_live = forward_manager.clone();
         let rsam_live = rsam_manager;
+
+        // Determine publisher sender (for UDP input mode with Pub/Sub enabled)
+        let publisher_tx = if settings.pubsub.enabled && settings.pubsub.input_mode == "udp" {
+            if let Some(ref client) = pubsub_client {
+                match pubsub::publisher::start_publisher(
+                    client,
+                    &settings.pubsub,
+                    &format!("{}.{}", net, sta),
+                ).await {
+                    Ok(tx) => {
+                        tracing::info!("Pub/Sub publisher started");
+                        Some(tx)
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to start Pub/Sub publisher: {}. Continuing without publishing.", e);
+                        None
+                    }
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         tokio::spawn(async move {
-            run_pipeline(pipe_rx, trigger_config, intensity_config, ws, sm, sns_live, hue_live, audio_live, sound_live, fwd_live, rsam_live).await;
+            run_pipeline(pipe_rx, trigger_config, intensity_config, ws, sm, sns_live, hue_live, audio_live, sound_live, fwd_live, rsam_live, publisher_tx).await;
         });
 
-        let (recv_tx, mut recv_rx) = mpsc::channel(100);
-        let udp_port = settings.settings.port;
-        tokio::spawn(async move {
-            if let Err(e) = start_receiver(udp_port, recv_tx).await {
-                tracing::error!("Receiver error: {}", e);
+        if settings.pubsub.enabled && settings.pubsub.input_mode == "pubsub" {
+            // SUBSCRIBER MODE: receive data from Pub/Sub instead of UDP
+            if let Some(ref client) = pubsub_client {
+                let cancel = tokio_util::sync::CancellationToken::new();
+                match pubsub::subscriber::start_subscriber(
+                    client,
+                    &settings.pubsub,
+                    &format!("{}.{}", net, sta),
+                    pipe_tx,
+                    cancel,
+                ).await {
+                    Ok(()) => tracing::info!("Pub/Sub subscriber started"),
+                    Err(e) => {
+                        tracing::error!("Failed to start Pub/Sub subscriber: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+            } else {
+                tracing::error!("Pub/Sub input_mode is 'pubsub' but client is not available");
+                std::process::exit(1);
             }
-        });
+        } else {
+            // UDP MODE (default)
+            let (recv_tx, mut recv_rx) = mpsc::channel(100);
+            let udp_port = settings.settings.port;
+            tokio::spawn(async move {
+                if let Err(e) = start_receiver(udp_port, recv_tx).await {
+                    tracing::error!("Receiver error: {}", e);
+                }
+            });
 
-        tokio::spawn(async move {
-            while let Some(packet) = recv_rx.recv().await {
-                let _ = pipe_tx.send(packet.data).await;
-            }
-        });
+            tokio::spawn(async move {
+                while let Some(packet) = recv_rx.recv().await {
+                    let _ = pipe_tx.send(packet.data).await;
+                }
+            });
+        }
     }
 
     tracing::info!("Running in Live UDP mode. Press Ctrl+C to stop.");

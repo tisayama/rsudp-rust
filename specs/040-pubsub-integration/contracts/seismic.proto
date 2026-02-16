@@ -1,0 +1,52 @@
+// Protocol Buffers schema for rsudp-rust Pub/Sub seismic data exchange.
+//
+// This schema defines the wire format for seismic data batches published
+// to Google Cloud Pub/Sub. Both publisher and subscriber instances use
+// this schema for serialization/deserialization.
+//
+// Usage:
+//   - Rust: Generated via prost-build in build.rs
+//   - Python/other: protoc --python_out=. seismic.proto
+
+syntax = "proto3";
+
+package rsudp.seismic;
+
+// SeismicBatch represents a 0.5-second aggregation window containing
+// raw seismic sample data from all active channels of a single station.
+//
+// Published as the `data` field of a Pub/Sub message with:
+//   - attribute "dedup_key": "{station}:{window_start ISO8601}"
+//   - attribute "station": "{network}.{station}"
+//   - attribute "window_start": "{window_start ISO8601}"
+//   - ordering_key: "{network}.{station}"
+message SeismicBatch {
+  // Station identifier in "{network}.{station}" format (e.g., "AM.R6E01")
+  string station = 1;
+
+  // Window start time as Unix milliseconds (floored to 500ms boundary)
+  int64 window_start_ms = 2;
+
+  // Window end time as Unix milliseconds
+  int64 window_end_ms = 3;
+
+  // Sample rate in Hz (typically 100.0 for Raspberry Shake)
+  double sample_rate = 4;
+
+  // Per-channel sample data within this window
+  repeated ChannelData channels = 5;
+}
+
+// ChannelData contains raw integer samples for a single seismic channel
+// within the batch window.
+message ChannelData {
+  // Channel code (e.g., "EHZ", "ENE", "ENN", "ENZ")
+  string channel = 1;
+
+  // Raw digitizer counts (signed 32-bit integers, before sensitivity
+  // coefficient adjustment or deconvolution). Uses packed encoding.
+  repeated int32 samples = 2;
+
+  // Start time of this channel's data as Unix milliseconds
+  int64 start_time_ms = 3;
+}

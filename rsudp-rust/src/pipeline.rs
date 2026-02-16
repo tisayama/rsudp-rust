@@ -15,6 +15,7 @@ use crate::hue::HueIntegration;
 use crate::sound::AudioController;
 use crate::settings::AlertSoundSettings;
 use crate::forward::ForwardManager;
+use crate::pubsub::publisher::SegmentData;
 use crate::rsam::RsamManager;
 use std::sync::Arc;
 
@@ -30,6 +31,7 @@ pub async fn run_pipeline(
     alert_sound_settings: AlertSoundSettings,
     forward_manager: Option<Arc<ForwardManager>>,
     mut rsam_manager: Option<RsamManager>,
+    publisher_tx: Option<mpsc::Sender<SegmentData>>,
 ) {
     info!("Pipeline started");
     let mut tm = TriggerManager::new(trigger_config);
@@ -153,7 +155,7 @@ pub async fn run_pipeline(
                             tokio::spawn(async move {
                                 tokio::time::sleep(delay).await;
                                 let max_int = {
-                                    let mut max_ints = shared_state.alert_max_intensities.lock().unwrap();
+                                    let max_ints = shared_state.alert_max_intensities.lock().unwrap();
                                     // Don't remove here if pipeline reset needs it? 
                                     // Actually pipeline reset happens much later or earlier.
                                     // Pipeline resets when ratio drops. Snapshot task runs independently.
@@ -265,6 +267,17 @@ pub async fn run_pipeline(
                         }
                     }
                 }
+            }
+
+            // --- PUBSUB PUBLISHER ---
+            if let Some(ref pub_tx) = publisher_tx {
+                let seg_data = SegmentData {
+                    channel: segment.channel.clone(),
+                    samples: segment.samples.iter().map(|&s| s as i32).collect(),
+                    start_time_ms: segment.starttime.timestamp_millis(),
+                    sample_rate: segment.sampling_rate,
+                };
+                let _ = pub_tx.send(seg_data).await;
             }
 
             web_state.broadcast_waveform(segment.channel.clone(), segment.starttime, segment.samples.clone()).await;
