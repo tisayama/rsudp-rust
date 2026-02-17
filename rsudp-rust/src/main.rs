@@ -330,7 +330,7 @@ async fn main() {
         let fwd_sim = forward_manager.clone();
         let rsam_sim = rsam_manager;
         let pipeline_handle = tokio::spawn(async move {
-            run_pipeline(pipe_rx, trigger_config, intensity_config, ws, sm, sns_sim, hue_sim, audio_sim, sound_sim, fwd_sim, rsam_sim, None).await;
+            run_pipeline(pipe_rx, trigger_config, intensity_config, ws, sm, sns_sim, hue_sim, audio_sim, sound_sim, fwd_sim, rsam_sim, None, settings.capture.clone()).await;
         });
 
         let bytes = std::fs::read(&path).unwrap();
@@ -377,7 +377,7 @@ async fn main() {
         };
 
         tokio::spawn(async move {
-            run_pipeline(pipe_rx, trigger_config, intensity_config, ws, sm, sns_live, hue_live, audio_live, sound_live, fwd_live, rsam_live, publisher_tx).await;
+            run_pipeline(pipe_rx, trigger_config, intensity_config, ws, sm, sns_live, hue_live, audio_live, sound_live, fwd_live, rsam_live, publisher_tx, settings.capture.clone()).await;
         });
 
         if settings.pubsub.enabled && settings.pubsub.input_mode == "pubsub" {

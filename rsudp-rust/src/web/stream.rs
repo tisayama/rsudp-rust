@@ -3,7 +3,7 @@ use crate::intensity::IntensityResult;
 use crate::parser::stationxml::ChannelResponse;
 use crate::trigger::AlertEvent;
 use crate::web::history::{AlertHistoryManager, SharedHistory};
-use crate::web::plot::compute_spectrogram;
+use crate::web::spectrogram::compute_spectrogram;
 use axum::{
     extract::ws::Message,
     extract::{State, WebSocketUpgrade},

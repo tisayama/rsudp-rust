@@ -13,7 +13,7 @@ use chrono::Utc;
 use crate::web::sns::{SNSManager, NotificationEvent};
 use crate::hue::HueIntegration;
 use crate::sound::AudioController;
-use crate::settings::AlertSoundSettings;
+use crate::settings::{AlertSoundSettings, CaptureSettings};
 use crate::forward::ForwardManager;
 use crate::pubsub::publisher::SegmentData;
 use crate::rsam::RsamManager;
@@ -24,7 +24,7 @@ pub async fn run_pipeline(
     trigger_config: TriggerConfig,
     intensity_config: Option<IntensityConfig>,
     web_state: WebState,
-    sensitivity_map: HashMap<String, f64>,
+    _sensitivity_map: HashMap<String, f64>,
     sns_manager: Option<Arc<SNSManager>>,
     hue_integration: Option<HueIntegration>,
     audio_controller: Option<AudioController>,
@@ -32,6 +32,7 @@ pub async fn run_pipeline(
     forward_manager: Option<Arc<ForwardManager>>,
     mut rsam_manager: Option<RsamManager>,
     publisher_tx: Option<mpsc::Sender<SegmentData>>,
+    capture_settings: CaptureSettings,
 ) {
     info!("Pipeline started");
     let mut tm = TriggerManager::new(trigger_config);
@@ -148,64 +149,52 @@ pub async fn run_pipeline(
                             let shared_state = web_state.clone();
                             let alert_ch = segment.channel.clone();
                             let alert_sta = segment.station.clone();
-                            let s_map = sensitivity_map.clone();
                             let t_settings_reset = settings.clone();
                             let sns_for_reset = sns_manager.clone();
+                            let cap_settings = capture_settings.clone();
 
                             tokio::spawn(async move {
                                 tokio::time::sleep(delay).await;
                                 let max_int = {
                                     let max_ints = shared_state.alert_max_intensities.lock().unwrap();
-                                    // Don't remove here if pipeline reset needs it? 
-                                    // Actually pipeline reset happens much later or earlier.
-                                    // Pipeline resets when ratio drops. Snapshot task runs independently.
-                                    // We should peek or clone, but remove is safer to clean up memory.
-                                    // However, pipeline needs it for RESET log.
-                                    // Let's assume snapshot task finishes AFTER reset usually? No, reset depends on ratio.
-                                    // If reset happens first, pipeline removes it. Then snapshot task gets -2.0.
-                                    // If snapshot happens first, snapshot removes it. Then pipeline gets -9.9.
-                                    // Solution: Do not remove in snapshot task if we want pipeline logging.
-                                    // But pipeline logging is critical.
-                                    // Let's rely on pipeline to remove it on RESET.
-                                    // Snapshot task can just get current value.
-                                    match max_ints.get(&alert_id) {
-                                        Some(&v) => v,
-                                        None => -2.0
-                                    }
+                                    max_ints.get(&alert_id).copied().unwrap_or(-2.0)
                                 };
                                 let shindo_class = crate::intensity::get_shindo_class(max_int);
                                 let intensity_message = crate::web::alerts::format_shindo_message(&shindo_class);
-                                let sens_opt = s_map.get(&alert_ch).cloned();
                                 let pre_trigger_duration = plot_settings.window_seconds * (1.0 - plot_settings.save_pct);
-                                let target_start_time = trigger_time - chrono::Duration::milliseconds((pre_trigger_duration * 1000.0) as i64);
-                                let (trimmed_data, actual_start_time) = {
+                                let start_time = trigger_time - chrono::Duration::milliseconds((pre_trigger_duration * 1000.0) as i64);
+                                let end_time = start_time + chrono::Duration::milliseconds((plot_settings.window_seconds * 1000.0) as i64);
+                                let channels: Vec<String> = {
                                     let buffers = shared_state.waveform_buffers.lock().unwrap();
-                                    let mut data = HashMap::new();
-                                    let mut common_start_time = target_start_time;
-                                    for (c, b) in buffers.iter() {
-                                        let (samples, st) = b.extract_window(target_start_time, plot_settings.window_seconds);
-                                        data.insert(c.clone(), samples);
-                                        if c == &alert_ch { common_start_time = st; }
-                                    }
-                                    (data, common_start_time)
+                                    buffers.keys().cloned().collect()
                                 };
                                 let out_dir = plot_settings.output_dir.clone();
-                                let snapshot_path = if plot_settings.eq_screenshots {
-                                    match crate::web::alerts::generate_snapshot(alert_id, &alert_sta, &trimmed_data, actual_start_time, sens_opt, max_int, &out_dir) {
-                                        Ok(path) => {
-                                            let mut history = shared_state.history.lock().unwrap();
-                                            history.set_snapshot_path(alert_id, path.clone());
-                                            Some(path)
-                                        },
-                                        Err(e) => { warn!("Failed to generate snapshot: {}", e); None }
-                                    }
+                                let snapshot_path: Option<std::path::PathBuf> = if cap_settings.enabled {
+                                    crate::web::alerts::capture_screenshot(
+                                        &cap_settings.service_url,
+                                        cap_settings.timeout_seconds,
+                                        &alert_sta,
+                                        &channels,
+                                        start_time,
+                                        end_time,
+                                        &shindo_class,
+                                        max_int,
+                                        &cap_settings.backend_url,
+                                        &out_dir,
+                                    ).await
                                 } else {
                                     None
                                 };
-                                if let Err(e) = crate::web::alerts::send_reset_email(&t_settings_reset, &alert_ch, trigger_time, Utc::now(), max_int, snapshot_path.as_ref().map(|p| format!("http://localhost:8080/images/alerts/{}", p)).as_deref(), &intensity_message) { warn!("Failed to send reset email: {}", e); }
+                                if let Some(ref p) = snapshot_path {
+                                    let mut history = shared_state.history.lock().unwrap();
+                                    if let Some(fname) = p.file_name() {
+                                        history.set_snapshot_path(alert_id, fname.to_string_lossy().to_string());
+                                    }
+                                }
+                                if let Err(e) = crate::web::alerts::send_reset_email(&t_settings_reset, &alert_ch, trigger_time, Utc::now(), max_int, snapshot_path.as_ref().and_then(|p| p.file_name()).map(|f| format!("http://localhost:8080/images/alerts/{}", f.to_string_lossy())).as_deref(), &intensity_message) { warn!("Failed to send reset email: {}", e); }
                                 if let Some(sns) = sns_for_reset.clone() {
                                     let event = NotificationEvent {
-                                        event_type: AlertEventType::Reset, timestamp: Utc::now(), station_id: alert_sta.clone(), channel: alert_ch.clone(), max_ratio: alert.max_ratio, max_intensity: max_int, snapshot_path: snapshot_path.as_ref().map(|p| out_dir.join("alerts").join(p)),
+                                        event_type: AlertEventType::Reset, timestamp: Utc::now(), station_id: alert_sta.clone(), channel: alert_ch.clone(), max_ratio: alert.max_ratio, max_intensity: max_int, snapshot_path: snapshot_path.clone(),
                                     };
                                     tokio::spawn(async move { sns.notify_reset(&event).await; });
                                 }
@@ -215,14 +204,21 @@ pub async fn run_pipeline(
                                     history.reset_event(alert_id, Utc::now(), max_int, intensity_message.clone());
                                 }
                                 shared_state.broadcast_alert_end(alert_id, alert_ch, Utc::now(), max_int, intensity_message).await;
+
+                                // Delayed cleanup: remove max_int entry after RESET has had time to read it
+                                let cleanup_state = shared_state.clone();
+                                tokio::spawn(async move {
+                                    tokio::time::sleep(Duration::from_secs(300)).await;
+                                    cleanup_state.alert_max_intensities.lock().unwrap().remove(&alert_id);
+                                });
                             });
                         },
                         AlertEventType::Reset => {
                             if let Some(alert_id) = active_alerts.remove(&id) {
                                 let max_int = {
-                                    let mut max_ints = web_state.alert_max_intensities.lock().unwrap();
-                                    // Remove here to clean up
-                                    max_ints.remove(&alert_id).unwrap_or(-9.9)
+                                    let max_ints = web_state.alert_max_intensities.lock().unwrap();
+                                    // Read but don't remove — snapshot task will clean up
+                                    max_ints.get(&alert_id).copied().unwrap_or(-9.9)
                                 };
                                 let shindo = crate::intensity::get_shindo_class(max_int);
                                 info!("{} | Max Intensity: {:.2} (JMA: {})", alert, max_int, shindo);

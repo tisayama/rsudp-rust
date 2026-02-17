@@ -43,6 +43,8 @@ pub struct Settings {
     pub hue: HueConfig,
     #[serde(alias = "PUBSUB")]
     pub pubsub: PubsubSettings,
+    #[serde(alias = "CAPTURE")]
+    pub capture: CaptureSettings,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -382,6 +384,30 @@ pub struct PubsubSettings {
     pub batch_interval_ms: u64,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "lowercase")]
+pub struct CaptureSettings {
+    #[serde(alias = "ENABLED")]
+    pub enabled: bool,
+    #[serde(alias = "SERVICE_URL")]
+    pub service_url: String,
+    #[serde(alias = "TIMEOUT_SECONDS")]
+    pub timeout_seconds: u64,
+    #[serde(alias = "BACKEND_URL")]
+    pub backend_url: String,
+}
+
+impl Default for CaptureSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            service_url: "http://localhost:9100".to_string(),
+            timeout_seconds: 30,
+            backend_url: "http://localhost:8080".to_string(),
+        }
+    }
+}
+
 impl Default for PubsubSettings {
     fn default() -> Self {
         Self {
@@ -648,7 +674,7 @@ impl Settings {
         // T009: Detect unknown fields
         if let Ok(table) = config.clone().try_deserialize::<serde_json::Value>() {
             if let Some(map) = table.as_object() {
-                let known_sections = ["settings", "printdata", "write", "plot", "forward", "alert", "alertsound", "custom", "tweets", "telegram", "googlechat", "discord", "sns", "line", "bluesky", "rsam", "hue", "pubsub"];
+                let known_sections = ["settings", "printdata", "write", "plot", "forward", "alert", "alertsound", "custom", "tweets", "telegram", "googlechat", "discord", "sns", "line", "bluesky", "rsam", "hue", "pubsub", "capture"];
                 for key in map.keys() {
                     let lower_key = key.to_lowercase();
                     if !known_sections.contains(&lower_key.as_str()) {
