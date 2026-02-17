@@ -1,0 +1,31 @@
+[Unit]
+Description=rsudp Playwright Capture Service
+After=network.target rsudp.service
+
+[Service]
+Type=simple
+User=rsudp
+Group=rsudp
+WorkingDirectory=/opt/rsudp-capture
+ExecStart=/usr/bin/node server.js
+Environment=CAPTURE_PORT=9100
+Environment=WEBUI_URL=http://localhost:3000
+
+# Resource limits (non-interference with monitoring)
+Nice=19
+MemoryMax=300M
+
+# Reliability
+Restart=on-failure
+RestartSec=10
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

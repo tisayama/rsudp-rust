@@ -1,0 +1,150 @@
+openapi: 3.0.3
+info:
+  title: rsudp-rust Capture Data API
+  description: |
+    New endpoint added to the rsudp-rust backend to serve historical
+    waveform and spectrogram data for the capture page to render.
+  version: 1.0.0
+
+servers:
+  - url: http://localhost:8080
+    description: rsudp-rust backend
+
+paths:
+  /api/capture/data:
+    get:
+      summary: Get waveform and spectrogram data for capture rendering
+      description: |
+        Returns buffered waveform samples and spectrogram columns for
+        the specified time range and channels. Used by the WebUI capture
+        page to render a static snapshot.
+      parameters:
+        - name: channels
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Comma-separated channel list
+          example: "EHZ,EHN,EHE,ENZ"
+        - name: start
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+          description: Window start time (ISO 8601)
+        - name: end
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+          description: Window end time (ISO 8601)
+      responses:
+        '200':
+          description: Data retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaptureDataResponse'
+        '400':
+          description: Invalid parameters
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+        '404':
+          description: No data available for the specified range
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+
+components:
+  schemas:
+    CaptureDataResponse:
+      type: object
+      properties:
+        station:
+          type: string
+          example: "AM.R6E01"
+        sample_rate:
+          type: number
+          example: 100.0
+        channels:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/ChannelWaveform'
+        spectrogram:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/ChannelSpectrogram'
+        sensitivity:
+          type: object
+          additionalProperties:
+            type: number
+          description: Per-channel sensitivity values (counts/unit)
+        settings:
+          $ref: '#/components/schemas/PlotSettings'
+
+    ChannelWaveform:
+      type: object
+      properties:
+        samples:
+          type: array
+          items:
+            type: number
+          description: Raw waveform sample values
+        start_time:
+          type: string
+          format: date-time
+          description: Timestamp of first sample
+
+    ChannelSpectrogram:
+      type: object
+      properties:
+        columns:
+          type: array
+          items:
+            type: array
+            items:
+              type: integer
+              minimum: 0
+              maximum: 255
+          description: "2D array [time_column][frequency_bin], u8 colormap indices"
+        frequency_bins:
+          type: integer
+          example: 64
+        hop_duration:
+          type: number
+          description: Seconds between spectrogram columns
+          example: 0.13
+        first_column_timestamp:
+          type: number
+          description: Unix timestamp (seconds) of first column
+
+    PlotSettings:
+      type: object
+      properties:
+        filter_waveform:
+          type: boolean
+        filter_highpass:
+          type: number
+        filter_lowpass:
+          type: number
+        filter_corners:
+          type: integer
+        deconvolve:
+          type: boolean
+        spectrogram_freq_min:
+          type: number
+        spectrogram_freq_max:
+          type: number
+        spectrogram_log_y:
+          type: boolean

@@ -1,0 +1,13 @@
+{
+  "name": "rsudp-capture-service",
+  "version": "1.0.0",
+  "description": "Screenshot capture service for rsudp-rust alert plots using Playwright",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "install-browser": "npx playwright install --with-deps chromium"
+  },
+  "dependencies": {
+    "playwright-core": "^1.51.0"
+  }
+}

@@ -1,0 +1,143 @@
+openapi: 3.0.3
+info:
+  title: rsudp Capture Service API
+  description: |
+    Screenshot capture service that generates plot images using Playwright.
+    Runs as a separate process from rsudp-rust, communicating via HTTP.
+  version: 1.0.0
+
+servers:
+  - url: http://localhost:9100
+    description: Default capture service (local)
+
+paths:
+  /capture:
+    post:
+      summary: Generate a plot screenshot
+      description: |
+        Navigates the headless browser to the WebUI capture page with the
+        specified parameters, waits for rendering completion, takes a
+        screenshot, and returns the PNG image.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CaptureRequest'
+      responses:
+        '200':
+          description: Screenshot generated successfully
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: Invalid request parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal error (browser crash, render timeout)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Service not ready (browser starting up)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /health:
+    get:
+      summary: Health check
+      description: Returns service status and browser readiness.
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+components:
+  schemas:
+    CaptureRequest:
+      type: object
+      required:
+        - station
+        - channels
+        - start_time
+        - end_time
+        - intensity_class
+        - intensity_value
+        - backend_url
+      properties:
+        station:
+          type: string
+          example: "AM.R6E01"
+        channels:
+          type: array
+          items:
+            type: string
+          example: ["EHZ", "EHN", "EHE", "ENZ"]
+        start_time:
+          type: string
+          format: date-time
+          example: "2026-02-16T10:00:00Z"
+        end_time:
+          type: string
+          format: date-time
+          example: "2026-02-16T10:01:30Z"
+        intensity_class:
+          type: string
+          enum: ["0", "1", "2", "3", "4", "5-", "5+", "6-", "6+", "7"]
+          example: "3"
+        intensity_value:
+          type: number
+          format: double
+          example: 2.85
+        backend_url:
+          type: string
+          format: uri
+          example: "http://localhost:8080"
+        width:
+          type: integer
+          default: 1000
+          example: 1000
+        height:
+          type: integer
+          description: "Default: 500 * number of channels"
+          example: 2000
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          example: "Render timeout after 30000ms"
+        details:
+          type: string
+          example: "Page did not emit data-capture-ready within timeout"
+
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [ready, starting, error]
+          example: "ready"
+        browser_connected:
+          type: boolean
+          example: true
+        uptime_seconds:
+          type: integer
+          example: 3600
+        captures_completed:
+          type: integer
+          example: 42

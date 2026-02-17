@@ -13,6 +13,9 @@ webui/out/
 webui/build/
 webui/dist/
 
+# Capture service
+capture-service/node_modules/
+
 # Logs
 *.log
 npm-debug.log*

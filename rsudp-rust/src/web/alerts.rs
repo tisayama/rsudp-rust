@@ -130,35 +130,193 @@ pub fn send_reset_email(
     Ok(())
 }
 
-use crate::web::plot::draw_rsudp_plot;
+use std::path::{Path, PathBuf};
 
-use std::collections::HashMap;
-
-
-
-use std::path::Path;
-
-pub fn generate_snapshot(
-    id: Uuid,
+/// Capture a screenshot via the Playwright capture service.
+///
+/// Sends a CaptureRequest to the capture service and writes the returned PNG
+/// to `{output_dir}/alerts/{uuid}.png`. Returns the file path on success, or
+/// None on any failure (timeout, connection error, HTTP error).
+pub async fn capture_screenshot(
+    service_url: &str,
+    timeout_seconds: u64,
     station: &str,
-    channel_data: &HashMap<String, Vec<f64>>,
+    channels: &[String],
     start_time: DateTime<Utc>,
-    sensitivity: Option<f64>,
-    max_intensity: f64,
+    end_time: DateTime<Utc>,
+    intensity_class: &str,
+    intensity_value: f64,
+    backend_url: &str,
     output_dir: &Path,
-) -> Result<String, Box<dyn std::error::Error>> {
-    let filename = format!("{}.png", id);
+) -> Option<PathBuf> {
+    use tracing::warn;
+
+    let alert_id = Uuid::new_v4();
+    let filename = format!("{}.png", alert_id);
     let alerts_dir = output_dir.join("alerts");
-    
-    if !alerts_dir.exists() {
-        std::fs::create_dir_all(&alerts_dir)?;
+
+    let request_body = serde_json::json!({
+        "station": station,
+        "channels": channels,
+        "start_time": start_time.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+        "end_time": end_time.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+        "intensity_class": intensity_class,
+        "intensity_value": intensity_value,
+        "backend_url": backend_url,
+        "width": 1000,
+        "height": 500 * channels.len(),
+    });
+
+    let url = format!("{}/capture", service_url.trim_end_matches('/'));
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(timeout_seconds))
+        .build()
+        .unwrap_or_default();
+
+    let response = match client.post(&url).json(&request_body).send().await {
+        Ok(resp) => resp,
+        Err(e) => {
+            warn!("Capture service request failed: {}", e);
+            return None;
+        }
+    };
+
+    if !response.status().is_success() {
+        warn!(
+            "Capture service returned HTTP {}: {}",
+            response.status(),
+            response.text().await.unwrap_or_default()
+        );
+        return None;
     }
-    
+
+    let png_bytes = match response.bytes().await {
+        Ok(b) => b,
+        Err(e) => {
+            warn!("Failed to read capture response body: {}", e);
+            return None;
+        }
+    };
+
+    if let Err(e) = std::fs::create_dir_all(&alerts_dir) {
+        warn!("Failed to create alerts directory: {}", e);
+        return None;
+    }
+
     let path = alerts_dir.join(&filename);
+    if let Err(e) = std::fs::write(&path, &png_bytes) {
+        warn!("Failed to write capture PNG to {}: {}", path.display(), e);
+        return None;
+    }
 
-    draw_rsudp_plot(path.to_str().unwrap(), station, channel_data, start_time, 100.0, sensitivity, max_intensity)?;
+    Some(path)
+}
 
-    Ok(filename)
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    /// T006: Test capture_screenshot success — mock server returns PNG, verify file written
+    #[tokio::test]
+    async fn test_capture_screenshot_success() {
+        // Start a mock HTTP server that returns a fake PNG
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let handle = std::thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut buf = [0u8; 4096];
+                let _ = std::io::Read::read(&mut stream, &mut buf);
+                let fake_png = b"\x89PNG\r\n\x1a\nfake-png-data";
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: {}\r\n\r\n",
+                    fake_png.len()
+                );
+                let _ = stream.write_all(response.as_bytes());
+                let _ = stream.write_all(fake_png);
+            }
+        });
+
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let result = capture_screenshot(
+            &format!("http://127.0.0.1:{}", addr.port()),
+            5,
+            "AM.R6E01",
+            &["EHZ".to_string(), "EHN".to_string()],
+            Utc::now() - chrono::Duration::seconds(60),
+            Utc::now(),
+            "3",
+            2.85,
+            "http://localhost:8080",
+            tmp_dir.path(),
+        )
+        .await;
+
+        handle.join().unwrap();
+
+        assert!(result.is_some(), "capture_screenshot should return Some(path)");
+        let path = result.unwrap();
+        assert!(path.exists(), "PNG file should exist at {:?}", path);
+        assert!(path.to_str().unwrap().contains("alerts/"));
+        let content = std::fs::read(&path).unwrap();
+        assert!(content.starts_with(b"\x89PNG"), "File should start with PNG magic bytes");
+    }
+
+    /// T006: Test capture_screenshot timeout — mock server never responds, returns None
+    #[tokio::test]
+    async fn test_capture_screenshot_timeout() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        // Accept connection but never respond (causes timeout)
+        let handle = std::thread::spawn(move || {
+            if let Ok((_stream, _)) = listener.accept() {
+                std::thread::sleep(std::time::Duration::from_secs(10));
+            }
+        });
+
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let result = capture_screenshot(
+            &format!("http://127.0.0.1:{}", addr.port()),
+            1, // 1 second timeout
+            "AM.R6E01",
+            &["EHZ".to_string()],
+            Utc::now() - chrono::Duration::seconds(60),
+            Utc::now(),
+            "0",
+            0.0,
+            "http://localhost:8080",
+            tmp_dir.path(),
+        )
+        .await;
+
+        assert!(result.is_none(), "capture_screenshot should return None on timeout");
+
+        drop(handle); // Don't join — let the thread die
+    }
+
+    /// T006: Test capture_screenshot with connection refused — returns None
+    #[tokio::test]
+    async fn test_capture_screenshot_connection_refused() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let result = capture_screenshot(
+            "http://127.0.0.1:1", // Port 1 should refuse connection
+            2,
+            "AM.R6E01",
+            &["EHZ".to_string()],
+            Utc::now() - chrono::Duration::seconds(60),
+            Utc::now(),
+            "0",
+            0.0,
+            "http://localhost:8080",
+            tmp_dir.path(),
+        )
+        .await;
+
+        assert!(result.is_none(), "capture_screenshot should return None on connection refused");
+    }
 }
 
 
