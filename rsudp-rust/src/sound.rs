@@ -1,35 +1,35 @@
-use rodio::{OutputStream, OutputStreamHandle, Sink, Decoder};
+use rodio::{OutputStream, Sink, Decoder};
 use std::fs::File;
 use std::io::BufReader;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::path::Path;
 use tracing::{info, error};
 
+/// AudioManager that creates a fresh ALSA output stream per playback.
+///
+/// Long-lived OutputStream instances on Raspberry Pi accumulate ALSA
+/// buffer errors ("alsa::poll() returned POLLERR") after hours of idle.
+/// By opening the stream only when needed and closing it after playback
+/// completes, we avoid this problem entirely.
 pub struct AudioManager {
-    // _stream is removed to make struct Send. 
-    // The caller must keep the OutputStream alive.
-    handle: OutputStreamHandle,
-    current_sink: Mutex<Option<Sink>>,
+    _marker: (), // No persistent state needed
 }
 
 impl AudioManager {
-    pub fn new() -> Option<(Self, OutputStream)> {
-        // Try to get default output device
-        // On headless servers or docker, this might fail if no audio device.
-        let (_stream, handle) = match OutputStream::try_default() {
-            Ok(res) => res,
+    pub fn new() -> Option<Self> {
+        // Verify that an audio device exists at startup
+        match OutputStream::try_default() {
+            Ok(_) => {
+                info!("Audio output device detected");
+                // Drop the test stream immediately
+            }
             Err(e) => {
-                error!("Failed to initialize audio output stream: {}", e);
+                error!("No audio output device available: {}", e);
                 return None;
             }
-        };
+        }
 
-        let manager = Self {
-            handle,
-            current_sink: Mutex::new(None),
-        };
-        
-        Some((manager, _stream))
+        Some(Self { _marker: () })
     }
 
     pub fn play_file(&self, file_path: &str) {
@@ -39,7 +39,6 @@ impl AudioManager {
             return;
         }
 
-        // Load file first to ensure it's readable
         let file = match File::open(path) {
             Ok(f) => f,
             Err(e) => {
@@ -56,8 +55,16 @@ impl AudioManager {
             }
         };
 
-        // Create new sink (this is cheap)
-        let sink = match Sink::try_new(&self.handle) {
+        // Open a fresh output stream for this playback
+        let (_stream, handle) = match OutputStream::try_default() {
+            Ok(res) => res,
+            Err(e) => {
+                error!("Failed to open audio stream: {}", e);
+                return;
+            }
+        };
+
+        let sink = match Sink::try_new(&handle) {
             Ok(s) => s,
             Err(e) => {
                 error!("Failed to create audio sink: {}", e);
@@ -66,16 +73,12 @@ impl AudioManager {
         };
 
         sink.append(source);
-        
-        // Replace current sink to stop previous sound (Preemption)
-        let mut guard = self.current_sink.lock().unwrap();
-        // Dropping the old sink stops playback immediately
-        *guard = Some(sink);
-        
         info!("Playing audio: {}", file_path);
-        // We don't sleep here, we let it play in background thread managed by rodio
+
+        // Block until playback completes, then drop stream + sink.
+        // This runs on spawn_blocking so it won't block the tokio runtime.
+        sink.sleep_until_end();
     }
 }
 
-// Global or shared controller wrapper if needed, but Arc<AudioManager> is sufficient
 pub type AudioController = Arc<AudioManager>;

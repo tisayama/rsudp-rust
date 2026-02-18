@@ -116,17 +116,16 @@ async fn main() {
     hue_integration.start().await; // Starts discovery loop
 
     // Initialize Audio Manager (Optional, if device exists)
-    // We must keep _audio_stream alive for the duration of the program
-    let (audio_manager, _audio_stream) = if settings.alertsound.enabled {
+    let audio_manager = if settings.alertsound.enabled {
         match AudioManager::new() {
-            Some((am, stream)) => (Some(Arc::new(am)), Some(stream)),
+            Some(am) => Some(Arc::new(am)),
             None => {
                 tracing::warn!("Audio playback enabled but no output device found. Sound will be disabled.");
-                (None, None)
+                None
             }
         }
     } else {
-        (None, None)
+        None
     };
 
     tracing::info!("LOADED CONFIG: threshold={}, reset={}, port={}", settings.alert.threshold, settings.alert.reset, settings.settings.port);
