@@ -16,18 +16,30 @@ CAPTURE_SERVICE_FILE := rsudp-rust/systemd/$(CAPTURE_SERVICE_NAME).service
 USER := rsudp
 GROUP := rsudp
 
-.PHONY: all build install install-capture uninstall clean
+.PHONY: all build install install-deps install-capture setup-user uninstall clean
 
 all: build
+
+# Install system-level prerequisites (requires root)
+install-deps:
+	@echo "Installing system dependencies..."
+	apt-get update
+	apt-get install -y libssl-dev nodejs npm
+	@echo "System dependencies installed."
+
+# Create rsudp system user and group
+setup-user:
+	@echo "Setting up $(USER) user..."
+	getent group $(GROUP) >/dev/null || groupadd -r $(GROUP)
+	id -u $(USER) &>/dev/null || useradd -r -g $(GROUP) -d $(INSTALL_DATA_DIR) -s /usr/sbin/nologin -c "rsudp service account" $(USER)
+	@echo "User $(USER):$(GROUP) ready."
 
 build:
 	@echo "Building $(BINARY_NAME)..."
 	cargo build --release --manifest-path $(CARGO_TOML)
 
-install: install-capture
+install: install-deps setup-user install-capture
 	@echo "Installing $(BINARY_NAME)..."
-	# Create user/group if not exists
-	id -u $(USER) &>/dev/null || useradd -r -s /usr/sbin/nologin $(USER)
 
 	# Install binary
 	install -m 755 $(TARGET_RELEASE) $(INSTALL_BIN_DIR)/$(BINARY_NAME)
@@ -49,7 +61,7 @@ install: install-capture
 
 	@echo "Installation complete. Run 'systemctl start $(SERVICE_NAME)' to start the service."
 
-install-capture:
+install-capture: setup-user
 	@echo "Installing capture service..."
 	# Create capture service directory
 	install -d $(CAPTURE_INSTALL_DIR)
