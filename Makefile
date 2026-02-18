@@ -24,7 +24,7 @@ all: build
 install-deps:
 	@echo "Installing system dependencies..."
 	apt-get update
-	apt-get install -y libssl-dev nodejs npm
+	apt-get install -y libssl-dev nodejs npm libgtk-4-dev libgraphene-1.0-dev
 	@echo "System dependencies installed."
 
 # Create rsudp system user and group
@@ -73,11 +73,14 @@ install-capture: setup-user
 	# Install Node.js dependencies
 	cd $(CAPTURE_INSTALL_DIR) && npm install --production
 
-	# Install Playwright Chromium browser
-	cd $(CAPTURE_INSTALL_DIR) && npx playwright install --with-deps chromium
-
-	# Set ownership
+	# Set ownership before Playwright install (rsudp user needs write access)
 	chown -R $(USER):$(GROUP) $(CAPTURE_INSTALL_DIR)
+
+	# Install Playwright system dependencies (as root)
+	cd $(CAPTURE_INSTALL_DIR) && npx playwright install-deps chromium
+
+	# Install Playwright Chromium browser (as rsudp user)
+	su -s /bin/sh $(USER) -c 'cd $(CAPTURE_INSTALL_DIR) && npx playwright install chromium'
 
 	# Install systemd service
 	install -m 644 $(CAPTURE_SERVICE_FILE) $(SYSTEMD_DIR)/$(CAPTURE_SERVICE_NAME).service
