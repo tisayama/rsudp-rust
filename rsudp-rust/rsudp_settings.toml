@@ -1,0 +1,143 @@
+# rsudp-rust default configuration
+# Install location: /etc/rsudp/rsudp.toml
+
+[settings]
+port = 8888
+station = "Z0000"
+output_dir = "/var/lib/rsudp"
+debug = false
+
+[printdata]
+enabled = false
+
+[write]
+enabled = false
+channels = ["all"]
+
+[plot]
+enabled = true
+duration = 90
+spectrogram = true
+eq_screenshots = false
+channels = ["all"]
+filter_waveform = false
+filter_highpass = 0.7
+filter_lowpass = 2.0
+filter_corners = 4
+upper_limit = 15.0
+lower_limit = 0.0
+logarithmic_y_axis = false
+deconvolve = true
+units = "CHAN"
+
+[forward]
+enabled = false
+address = ["192.168.1.254"]
+port = [8888]
+channels = ["all"]
+fwd_data = true
+fwd_alarms = false
+
+[alert]
+enabled = true
+channel = "HZ"
+sta = 6.0
+lta = 30.0
+duration = 0.0
+threshold = 1.1
+reset = 0.5
+highpass = 0.1
+lowpass = 2.0
+deconvolve = false
+units = "VEL"
+
+[alertsound]
+enabled = false
+trigger_file = "/var/lib/rsudp/sounds/warning.mp3"
+default_reset_file = "/var/lib/rsudp/sounds/report_default.mp3"
+
+[alertsound.intensity_files]
+0 = "/var/lib/rsudp/sounds/intensity_0.mp3"
+1 = "/var/lib/rsudp/sounds/intensity_1.mp3"
+2 = "/var/lib/rsudp/sounds/intensity_2.mp3"
+3 = "/var/lib/rsudp/sounds/intensity_3.mp3"
+4 = "/var/lib/rsudp/sounds/intensity_4.mp3"
+"5-" = "/var/lib/rsudp/sounds/intensity_5low.mp3"
+"5+" = "/var/lib/rsudp/sounds/intensity_5high.mp3"
+"6-" = "/var/lib/rsudp/sounds/intensity_6low.mp3"
+"6+" = "/var/lib/rsudp/sounds/intensity_6high.mp3"
+7 = "/var/lib/rsudp/sounds/intensity_7.mp3"
+
+[capture]
+enabled = false
+service_url = "http://localhost:9100"
+timeout_seconds = 30
+backend_url = "http://localhost:8080"
+
+[hue]
+enabled = false
+app_key = ""
+target_ids = []
+
+[pubsub]
+enabled = false
+project_id = ""
+topic = ""
+subscription = ""
+input_mode = "udp"
+
+[rsam]
+enabled = false
+quiet = true
+fwaddr = "192.168.1.254"
+fwport = 8887
+fwformat = "LITE"
+channel = "HZ"
+interval = 10
+deconvolve = false
+units = "VEL"
+
+[discord]
+enabled = false
+webhook_url = ""
+use_embed = true
+send_images = true
+extra_text = ""
+
+[line]
+enabled = false
+channel_access_token = ""
+to_ids = ""
+extra_text = ""
+send_images = true
+s3_object_key_prefix = "rsudp/line/"
+s3_upload_timeout_seconds = 3
+
+[googlechat]
+enabled = false
+webhook_url = ""
+extra_text = ""
+send_images = false
+s3_object_key_prefix = "rsudp/googlechat/"
+s3_upload_timeout_seconds = 3
+
+[sns]
+enabled = false
+topic_arn = ""
+aws_region = ""
+extra_text = ""
+
+[telegram]
+enabled = false
+send_images = true
+token = ""
+chat_id = ""
+extra_text = ""
+upload_timeout = 10
+
+[bluesky]
+enabled = false
+post_images = true
+username = ""
+password = ""
+extra_text = ""

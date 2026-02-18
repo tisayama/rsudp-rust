@@ -53,6 +53,10 @@ install: install-deps setup-user install-capture
 	chown $(USER):$(GROUP) $(INSTALL_DATA_DIR)
 	chmod 750 $(INSTALL_DATA_DIR)
 
+	# Install sound files
+	install -d -o $(USER) -g $(GROUP) $(INSTALL_DATA_DIR)/sounds
+	install -m 644 -o $(USER) -g $(GROUP) rsudp-rust/sounds/*.mp3 $(INSTALL_DATA_DIR)/sounds/
+
 	# Install systemd service
 	install -m 644 $(SERVICE_FILE) $(SYSTEMD_DIR)/$(SERVICE_NAME).service
 
