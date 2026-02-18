@@ -28,6 +28,7 @@ interface CaptureSettings {
   filter_lowpass: number;
   filter_corners: number;
   deconvolve: boolean;
+  units: string;
   spectrogram_freq_min: number;
   spectrogram_freq_max: number;
   spectrogram_log_y: boolean;
