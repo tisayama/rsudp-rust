@@ -31,7 +31,7 @@ install-deps:
 setup-user:
 	@echo "Setting up $(USER) user..."
 	getent group $(GROUP) >/dev/null || groupadd -r $(GROUP)
-	id -u $(USER) &>/dev/null || useradd -r -g $(GROUP) -d $(INSTALL_DATA_DIR) -s /usr/sbin/nologin -c "rsudp service account" $(USER)
+	id -u $(USER) &>/dev/null || useradd -r -g $(GROUP) -G audio -d $(INSTALL_DATA_DIR) -s /usr/sbin/nologin -c "rsudp service account" $(USER)
 	@echo "User $(USER):$(GROUP) ready."
 
 build:
