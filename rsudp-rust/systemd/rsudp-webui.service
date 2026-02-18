@@ -1,0 +1,28 @@
+[Unit]
+Description=rsudp WebUI (Next.js)
+After=network.target rsudp.service
+
+[Service]
+Type=simple
+User=rsudp
+Group=rsudp
+WorkingDirectory=/opt/rsudp-webui
+ExecStart=/usr/bin/node server.js
+Environment=NODE_ENV=production
+Environment=PORT=3000
+Environment=HOSTNAME=0.0.0.0
+
+# Reliability
+Restart=on-failure
+RestartSec=5
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

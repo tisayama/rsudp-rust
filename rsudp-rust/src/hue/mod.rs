@@ -80,8 +80,10 @@ impl HueIntegration {
             if let Some((_id, ip)) = result {
                 match HueClient::new(&ip.to_string(), Some(self.config.app_key.clone())) {
                     Ok(c) => {
-                        let mut guard = self.client.lock().await;
-                        *guard = Some(c);
+                        {
+                            let mut guard = self.client.lock().await;
+                            *guard = Some(c);
+                        } // Mutex released before sleep
                         info!("Hue Integration connected to Bridge at {}", ip);
                         // Bridge found and connected — no need for aggressive re-discovery.
                         // Re-check every 10 minutes in case bridge IP changes.

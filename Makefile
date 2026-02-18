@@ -13,10 +13,13 @@ SERVICE_FILE := rsudp-rust/systemd/$(SERVICE_NAME).service
 CAPTURE_SERVICE_NAME := rsudp-capture
 CAPTURE_INSTALL_DIR := /opt/rsudp-capture
 CAPTURE_SERVICE_FILE := rsudp-rust/systemd/$(CAPTURE_SERVICE_NAME).service
+WEBUI_SERVICE_NAME := rsudp-webui
+WEBUI_INSTALL_DIR := /opt/rsudp-webui
+WEBUI_SERVICE_FILE := rsudp-rust/systemd/$(WEBUI_SERVICE_NAME).service
 USER := rsudp
 GROUP := rsudp
 
-.PHONY: all build install install-deps install-capture setup-user uninstall clean
+.PHONY: all build install install-deps install-capture install-webui setup-user uninstall clean
 
 all: build
 
@@ -38,7 +41,7 @@ build:
 	@echo "Building $(BINARY_NAME)..."
 	cargo build --release --manifest-path $(CARGO_TOML)
 
-install: install-deps setup-user install-capture
+install: install-deps setup-user install-webui install-capture
 	@echo "Installing $(BINARY_NAME)..."
 
 	# Install binary
@@ -64,6 +67,28 @@ install: install-deps setup-user install-capture
 	systemctl daemon-reload
 
 	@echo "Installation complete. Run 'systemctl start $(SERVICE_NAME)' to start the service."
+
+install-webui: setup-user
+	@echo "Installing WebUI..."
+	# Build WebUI
+	cd webui && npm ci && npm run build
+
+	# Install standalone output
+	install -d $(WEBUI_INSTALL_DIR)
+	cp -r webui/.next/standalone/. $(WEBUI_INSTALL_DIR)/
+	cp -r webui/.next/static $(WEBUI_INSTALL_DIR)/.next/static
+	cp -r webui/public $(WEBUI_INSTALL_DIR)/public
+
+	# Set ownership
+	chown -R $(USER):$(GROUP) $(WEBUI_INSTALL_DIR)
+
+	# Install systemd service
+	install -m 644 $(WEBUI_SERVICE_FILE) $(SYSTEMD_DIR)/$(WEBUI_SERVICE_NAME).service
+
+	# Reload systemd
+	systemctl daemon-reload
+
+	@echo "WebUI installed. Run 'systemctl start $(WEBUI_SERVICE_NAME)' to start."
 
 install-capture: setup-user
 	@echo "Installing capture service..."
