@@ -12,6 +12,7 @@ impl Discovery {
         let service_type = "_hue._tcp.local.";
         let receiver = mdns.browse(service_type).ok()?;
 
+        let mut result = None;
         let start = std::time::Instant::now();
         while start.elapsed() < timeout {
             while let Ok(event) = receiver.recv_timeout(Duration::from_millis(100)) {
@@ -37,11 +38,20 @@ impl Discovery {
                             }
                         }
 
-                        return Some((clean_id, *ip));
+                        result = Some((clean_id, *ip));
+                        break;
                     }
                 }
             }
+            if result.is_some() {
+                break;
+            }
         }
-        None
+
+        // Explicitly shut down the mDNS daemon to release sockets and threads.
+        // Without this, ServiceDaemon leaks file descriptors on each call.
+        let _ = mdns.shutdown();
+
+        result
     }
 }
