@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, VecDeque};
-use tracing::{info};
+use std::collections::HashMap;
+use tracing::info;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum AlertEventType {
@@ -95,70 +95,64 @@ struct StaLtaState {
     last_timestamp: Option<DateTime<Utc>>,
     exceed_start: Option<DateTime<Utc>>,
     is_exceeding: bool,
-    buffer: VecDeque<f64>,
+    filters: Vec<Biquad>,
+    sta: f64,
+    lta: f64,
+    sample_count: usize,
 }
 
 impl TriggerManager {
     pub fn new(config: TriggerConfig) -> Self {
-        info!("TriggerManager initialized (Slice Mode with Status).");
+        info!("TriggerManager initialized (Streaming Mode with Status).");
         Self { config, states: HashMap::new() }
     }
 
     pub fn add_sample(&mut self, id: &str, sample: f64, timestamp: DateTime<Utc>, _sensitivity: f64) -> Option<AlertEvent> {
         if !id.contains(&self.config.target_channel) { return None; }
 
-        let nlta = (self.config.lta_sec * 100.0) as usize;
-        let nsta = (self.config.sta_sec * 100.0) as usize;
-        let total_needed = nlta + 100;
-
         let clean_id = id.split('.').last().unwrap_or(id).trim_matches('\'').trim().to_string();
 
+        let highpass = self.config.highpass;
+        let lowpass = self.config.lowpass;
         let state = self.states.entry(clean_id.clone()).or_insert_with(|| StaLtaState {
             triggered: false, max_ratio: 0.0, last_timestamp: None, exceed_start: None, is_exceeding: false,
-            buffer: VecDeque::with_capacity(total_needed + 1),
+            filters: butter_bandpass_sos(4, highpass, lowpass, 100.0),
+            sta: 0.0,
+            lta: 1e-99,
+            sample_count: 0,
         });
 
+        // --- GAP DETECTION ---
         if let Some(last_ts) = state.last_timestamp {
             if (timestamp - last_ts).num_milliseconds().abs() > 1000 {
-                state.buffer.clear();
+                for bq in &mut state.filters {
+                    bq.s1 = 0.0;
+                    bq.s2 = 0.0;
+                }
+                state.sta = 0.0;
+                state.lta = 1e-99;
+                state.sample_count = 0;
             }
         }
         state.last_timestamp = Some(timestamp);
 
-        state.buffer.push_back(sample);
-        while state.buffer.len() > total_needed { state.buffer.pop_front(); }
+        // --- STREAMING STA/LTA CALCULATION ---
+        let mut val = sample;
+        for section in &mut state.filters { val = section.process(val); }
+        let energy = val * val;
 
-        if state.buffer.len() < nlta { return None; }
+        let csta = 1.0 / (self.config.sta_sec * 100.0);
+        let clta = 1.0 / (self.config.lta_sec * 100.0);
+        state.sta = csta * energy + (1.0 - csta) * state.sta;
+        state.lta = clta * energy + (1.0 - clta) * state.lta;
+        state.sample_count += 1;
 
-        // --- SLICE CALCULATION ---
-        let mut filters = butter_bandpass_sos(4, self.config.highpass, self.config.lowpass, 100.0);
-        let mut energies = Vec::with_capacity(state.buffer.len());
-        
-        for &s in &state.buffer {
-            let mut val = s;
-            for section in &mut filters { val = section.process(val); }
-            energies.push(val * val);
-        }
-
-        let a = 1.0 / nsta as f64;
-        let b = 1.0 / nlta as f64;
-        
-        let mut sta = energies[0] * a;
-        let mut lta = energies[0] * b + 1e-99;
-        let mut ratio = 0.0;
-
-        let ndat = energies.len();
-        
-        for i in 1..ndat {
-            sta = a * energies[i] + (1.0 - a) * sta;
-            lta = b * energies[i] + (1.0 - b) * lta;
-            
-            if ndat > nlta && i < nlta {
-                ratio = 0.0;
-            } else {
-                ratio = sta / lta;
-            }
-        }
+        let nlta = (self.config.lta_sec * 100.0) as usize;
+        let ratio = if state.sample_count < nlta {
+            0.0
+        } else {
+            state.sta / state.lta
+        };
 
         // --- TRIGGER LOGIC ---
         let threshold = self.config.threshold;
