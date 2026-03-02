@@ -18,34 +18,38 @@ async fn test_sta_lta_trigger() {
     let ts = Utc::now();
     let sensitivity = 1.0;
 
-    // 1. Warm up with baseline noise (no trigger)
-    for _ in 0..1000 {
+    // 1. Warm up with baseline noise (nlta = 1000 samples + 500 margin)
+    for _ in 0..1500 {
         assert!(tm.add_sample(id, 1.0, ts, sensitivity).is_none());
     }
 
     // 2. High amplitude (trigger)
     let mut alarm_event = None;
-    for _ in 0..100 {
+    for _ in 0..200 {
         if let Some(ev) = tm.add_sample(id, 100.0, ts, sensitivity) {
-            alarm_event = Some(ev);
-            break;
+            if ev.event_type == AlertEventType::Trigger {
+                alarm_event = Some(ev);
+                break;
+            }
         }
     }
 
     let ev = alarm_event.expect("Should have triggered");
-    matches!(ev.event_type, AlertEventType::Trigger);
+    assert_eq!(ev.event_type, AlertEventType::Trigger);
     println!("Alarm message: {}", ev.message);
 
     // 3. Back to noise (reset)
     let mut reset_event = None;
-    for _ in 0..2000 {
+    for _ in 0..3000 {
         if let Some(ev) = tm.add_sample(id, 1.0, ts, sensitivity) {
-            reset_event = Some(ev);
-            break;
+            if ev.event_type == AlertEventType::Reset {
+                reset_event = Some(ev);
+                break;
+            }
         }
     }
 
     let ev = reset_event.expect("Should have reset");
-    matches!(ev.event_type, AlertEventType::Reset);
+    assert_eq!(ev.event_type, AlertEventType::Reset);
     println!("Reset message: {}", ev.message);
 }

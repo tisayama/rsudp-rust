@@ -124,11 +124,10 @@ impl SteimDecoder {
             samples.push(x0);
             let mut cur = x0;
 
-            // Differences start from d1. In Steim, d1 is actually x0 - previous_x_last.
-            // But for the very first sample, d1 is often used as a check or skipped.
-            // Steim2 specification: differences are stored from i=2 (after X0, Xn)
-            // Reconstruct: x[i] = x[i-1] + di
-            for &d in diffs.iter().take(num_samples - 1) {
+            // d[0] is the difference x[0] - x_prev (previous record's last sample).
+            // It is not needed for reconstruction since x[0] = X0 is stored separately.
+            // Skip d[0] and use d[1], d[2], ... for forward integration.
+            for &d in diffs.iter().skip(1).take(num_samples - 1) {
                 cur = cur.wrapping_add(d);
                 samples.push(cur);
             }
