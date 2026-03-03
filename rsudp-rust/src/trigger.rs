@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use tracing::info;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -95,15 +95,13 @@ struct StaLtaState {
     last_timestamp: Option<DateTime<Utc>>,
     exceed_start: Option<DateTime<Utc>>,
     is_exceeding: bool,
-    filters: Vec<Biquad>,
-    sta: f64,
-    lta: f64,
+    raw_buffer: VecDeque<f64>,
     sample_count: usize,
 }
 
 impl TriggerManager {
     pub fn new(config: TriggerConfig) -> Self {
-        info!("TriggerManager initialized (Streaming Mode with Status).");
+        info!("TriggerManager initialized (Windowed STA/LTA Mode with Status).");
         Self { config, states: HashMap::new() }
     }
 
@@ -114,52 +112,74 @@ impl TriggerManager {
 
         let highpass = self.config.highpass;
         let lowpass = self.config.lowpass;
+        let nlta = (self.config.lta_sec * 100.0) as usize;
+        let nsta = (self.config.sta_sec * 100.0) as usize;
+        // Match Python rsudp window: nlta + one packet (25 samples at 100 SPS).
+        // ObsPy's Stream.slice(endtime - lta_sec) yields nlta + ~packet_size samples
+        // due to packet-boundary alignment, causing ndat > nlta which triggers
+        // ObsPy's recursive_sta_lta to zero the first nlta output elements.
+        let win_size = nlta + 25;
         let state = self.states.entry(clean_id.clone()).or_insert_with(|| StaLtaState {
             triggered: false, max_ratio: 0.0, last_timestamp: None, exceed_start: None, is_exceeding: false,
-            filters: butter_bandpass_sos(4, highpass, lowpass, 100.0),
-            sta: 0.0,
-            lta: 1e-99,
+            raw_buffer: VecDeque::with_capacity(win_size),
             sample_count: 0,
         });
 
         // --- GAP DETECTION ---
         if let Some(last_ts) = state.last_timestamp {
             if (timestamp - last_ts).num_milliseconds().abs() > 1000 {
-                for bq in &mut state.filters {
-                    bq.s1 = 0.0;
-                    bq.s2 = 0.0;
-                }
-                state.sta = 0.0;
-                state.lta = 1e-99;
+                state.raw_buffer.clear();
                 state.sample_count = 0;
             }
         }
         state.last_timestamp = Some(timestamp);
 
-        // --- STREAMING STA/LTA CALCULATION ---
-        let mut val = sample;
-        for section in &mut state.filters { val = section.process(val); }
-        let energy = val * val;
-
-        let csta = 1.0 / (self.config.sta_sec * 100.0);
-        let clta = 1.0 / (self.config.lta_sec * 100.0);
-        state.sta = csta * energy + (1.0 - csta) * state.sta;
-        state.lta = clta * energy + (1.0 - clta) * state.lta;
+        // --- WINDOWED STA/LTA (Python rsudp-faithful) ---
+        // Store raw (unfiltered) sample in ring buffer
+        state.raw_buffer.push_back(sample);
+        if state.raw_buffer.len() > win_size {
+            state.raw_buffer.pop_front();
+        }
         state.sample_count += 1;
 
-        let nlta = (self.config.lta_sec * 100.0) as usize;
-        let ratio = if state.sample_count < nlta {
-            0.0
-        } else {
-            state.sta / state.lta
-        };
+        // Evaluate only at packet boundaries (every 25 samples), matching Python rsudp.
+        // Python rsudp evaluates once per ~250ms packet at 100 SPS.
+        if state.sample_count % 25 != 0 || state.raw_buffer.len() < win_size {
+            return None;
+        }
+
+        // Compute ratio: fresh filter + recursive STA/LTA over entire buffer
+        let mut filters = butter_bandpass_sos(4, highpass, lowpass, 100.0);
+        let csta = 1.0 / nsta as f64;
+        let clta = 1.0 / nlta as f64;
+        let mut sta = 0.0_f64;
+        let mut lta = 1e-99_f64;
+        let mut ratio_last = 0.0_f64;
+        let mut ratio_max_tail = 0.0_f64;
+        for (i, &raw) in state.raw_buffer.iter().enumerate() {
+            let mut val = raw;
+            for section in &mut filters {
+                val = section.process(val);
+            }
+            let energy = val * val;
+            sta = csta * energy + (1.0 - csta) * sta;
+            lta = clta * energy + (1.0 - clta) * lta;
+            ratio_last = sta / lta;
+            // Match ObsPy: when ndat > nlta, first nlta values are zeroed.
+            // Track max for the non-zeroed tail (positions >= nlta).
+            if i >= nlta {
+                ratio_max_tail = ratio_max_tail.max(ratio_last);
+            }
+        }
 
         // --- TRIGGER LOGIC ---
+        // ALARM: use ratio_max_tail (matches Python rsudp stalta.max() after zeroing)
+        // RESET: use ratio_last (matches Python rsudp stalta[-1])
         let threshold = self.config.threshold;
         let reset_threshold = self.config.reset_threshold;
 
         if !state.triggered {
-            if ratio > threshold {
+            if ratio_max_tail > threshold {
                 if !state.is_exceeding {
                     state.is_exceeding = true;
                     state.exceed_start = Some(timestamp);
@@ -167,11 +187,11 @@ impl TriggerManager {
                 if let Some(start) = state.exceed_start {
                     if (timestamp - start).num_milliseconds() as f64 / 1000.0 >= self.config.duration {
                         state.triggered = true;
-                        state.max_ratio = ratio;
+                        state.max_ratio = ratio_max_tail;
                         state.is_exceeding = false;
                         return Some(AlertEvent {
                             timestamp, channel: id.to_string(), event_type: AlertEventType::Trigger,
-                            ratio, max_ratio: ratio, message: "ALARM".to_string(),
+                            ratio: ratio_max_tail, max_ratio: ratio_max_tail, message: "ALARM".to_string(),
                         });
                     }
                 }
@@ -179,24 +199,24 @@ impl TriggerManager {
                 state.is_exceeding = false; state.exceed_start = None;
             }
         } else {
-            state.max_ratio = state.max_ratio.max(ratio);
-            if ratio < reset_threshold {
+            state.max_ratio = state.max_ratio.max(ratio_max_tail);
+            if ratio_last < reset_threshold {
                 state.triggered = false;
                 let mr = state.max_ratio;
                 state.max_ratio = 0.0;
-                
+
                 return Some(AlertEvent {
                     timestamp, channel: id.to_string(), event_type: AlertEventType::Reset,
-                    ratio, max_ratio: mr, message: "RESET".to_string(),
+                    ratio: ratio_last, max_ratio: mr, message: "RESET".to_string(),
                 });
             }
         }
-        
+
         // --- PERIODIC STATUS REPORT ---
         if timestamp.timestamp_subsec_millis() < 10 {
              return Some(AlertEvent {
                 timestamp, channel: id.to_string(), event_type: AlertEventType::Status,
-                ratio, max_ratio: state.max_ratio.max(ratio), message: "STATUS".to_string(),
+                ratio: ratio_last, max_ratio: state.max_ratio.max(ratio_max_tail), message: "STATUS".to_string(),
             });
         }
 
