@@ -402,18 +402,15 @@ async fn handle_socket(socket: axum::extract::ws::WebSocket, state: WebState) {
         let timeout = tokio::time::timeout(
             std::time::Duration::from_secs(5),
             async {
-                while let Some(Ok(msg)) = receiver.next().await {
-                    if let Message::Text(text) = msg {
-                        if let Ok(req) = serde_json::from_str::<BackfillRequest>(&text) {
-                            if req.msg_type == "BackfillRequest" {
-                                debug!("Received BackfillRequest: {:?}", req.last_timestamp);
-                                return req.last_timestamp.and_then(|ts| {
-                                    DateTime::parse_from_rfc3339(&ts).ok().map(|dt| dt.with_timezone(&Utc))
-                                });
-                            }
+                if let Some(Ok(Message::Text(text))) = receiver.next().await {
+                    if let Ok(req) = serde_json::from_str::<BackfillRequest>(&text) {
+                        if req.msg_type == "BackfillRequest" {
+                            debug!("Received BackfillRequest: {:?}", req.last_timestamp);
+                            return req.last_timestamp.and_then(|ts| {
+                                DateTime::parse_from_rfc3339(&ts).ok().map(|dt| dt.with_timezone(&Utc))
+                            });
                         }
                     }
-                    break;
                 }
                 None
             }
@@ -489,10 +486,6 @@ async fn handle_socket(socket: axum::extract::ws::WebSocket, state: WebState) {
     let (mut filter_enabled, mut filter_highpass, mut filter_lowpass, mut filter_corners) = {
         let s = state.settings.read().unwrap();
         (s.filter_waveform, s.filter_highpass, s.filter_lowpass, s.filter_corners)
-    };
-    let (mut spec_freq_min, mut spec_freq_max) = {
-        let s = state.settings.read().unwrap();
-        (s.spectrogram_freq_min, s.spectrogram_freq_max)
     };
 
     // Note: bandpass filter is applied fresh (forward-only) to the full deconvolved
@@ -721,7 +714,7 @@ async fn handle_socket(socket: axum::extract::ws::WebSocket, state: WebState) {
                                 if !response.poles.is_empty() {
                                     // Add raw samples to context buffer
                                     let deconv_context = (deconv_context_seconds * sample_rate) as usize;
-                                    let raw_buf = raw_context_bufs.entry(channel.clone()).or_insert_with(VecDeque::new);
+                                    let raw_buf = raw_context_bufs.entry(channel.clone()).or_default();
                                     for &s in samples.iter() {
                                         raw_buf.push_back(s);
                                     }
@@ -859,10 +852,10 @@ async fn handle_socket(socket: axum::extract::ws::WebSocket, state: WebState) {
             }
             // Check for settings changes (filter, spectrogram range)
             _ = settings_check_interval.tick() => {
-                let (new_fe, new_hp, new_lp, new_fc, new_fmin, new_fmax) = {
+                let (new_fe, new_hp, new_lp, new_fc) = {
                     let s = state.settings.read().unwrap();
                     (s.filter_waveform, s.filter_highpass, s.filter_lowpass,
-                     s.filter_corners, s.spectrogram_freq_min, s.spectrogram_freq_max)
+                     s.filter_corners)
                 };
 
                 // Filter settings changed — update local state
@@ -878,9 +871,6 @@ async fn handle_socket(socket: axum::extract::ws::WebSocket, state: WebState) {
                     fft_states.clear();
                 }
 
-                // Update spectrogram freq range tracking (for future use)
-                spec_freq_min = new_fmin;
-                spec_freq_max = new_fmax;
             }
         }
     }

@@ -28,7 +28,7 @@ pub fn butter_bandpass_sos(order: usize, low_freq: f64, high_freq: f64, fs: f64)
     // For even N: N/2 unique pairs. For odd N: (N-1)/2 pairs + 1 real pole.
     let mut sections = Vec::new();
 
-    let n_unique = (order + 1) / 2; // ceil(order/2)
+    let n_unique = order.div_ceil(2);
     for k in 0..n_unique {
         let theta = PI * (2 * k + order + 1) as f64 / (2 * order) as f64;
         let p_re = theta.cos();

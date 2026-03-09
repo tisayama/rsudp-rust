@@ -60,7 +60,7 @@ pub struct SettingsSection {
     pub debug: bool,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "lowercase")]
 pub struct PrintDataSettings {
     #[serde(alias = "ENABLED")]
@@ -433,11 +433,6 @@ impl Default for SettingsSection {
     }
 }
 
-impl Default for PrintDataSettings {
-    fn default() -> Self {
-        Self { enabled: false }
-    }
-}
 
 impl Default for WriteSettings {
     fn default() -> Self {

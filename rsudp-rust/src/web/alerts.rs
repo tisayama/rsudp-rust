@@ -137,6 +137,7 @@ use std::path::{Path, PathBuf};
 /// Sends a CaptureRequest to the capture service and writes the returned PNG
 /// to `{output_dir}/alerts/{uuid}.png`. Returns the file path on success, or
 /// None on any failure (timeout, connection error, HTTP error).
+#[allow(clippy::too_many_arguments)]
 pub async fn capture_screenshot(
     service_url: &str,
     timeout_seconds: u64,

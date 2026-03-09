@@ -68,6 +68,7 @@ Auto-generated from all feature plans. Last updated: 2025-12-19
 - N/A (in-memory per-channel state only) (042-streaming-sta-lta)
 - Rust 1.7x (Edition 2021) + `chrono` (時刻処理), `serde` (シリアライゼーション), `tracing` (ログ) — すべて既存依存 (043-classic-stalta)
 - インメモリ (リングバッファ: `VecDeque<f64>`) (043-classic-stalta)
+- Rust 1.7x (Edition 2021) + `rodio` 0.17 (symphonia-mp3, symphonia-wav), `tracing` (ログ), `std::sync::mpsc` (チャネル) (044-audio-queue-playback)
 
 - Rust 1.7x (latest stable) + None (requires Rust toolchain: `rustc`, `cargo`) (001-init-rust-project)
 
@@ -87,9 +88,9 @@ cargo test [ONLY COMMANDS FOR ACTIVE TECHNOLOGIES][ONLY COMMANDS FOR ACTIVE TECH
 Rust 1.7x (latest stable): Follow standard conventions
 
 ## Recent Changes
+- 044-audio-queue-playback: Added Rust 1.7x (Edition 2021) + `rodio` 0.17 (symphonia-mp3, symphonia-wav), `tracing` (ログ), `std::sync::mpsc` (チャネル)
 - 043-classic-stalta: Added Rust 1.7x (Edition 2021) + `chrono` (時刻処理), `serde` (シリアライゼーション), `tracing` (ログ) — すべて既存依存
 - 042-streaming-sta-lta: Added Rust 1.7x (Edition 2021) + `chrono` (timestamps), `serde` (serialization), `tracing` (logging) — all existing
-- 041-playwright-alert-capture: Added Rust 1.7x (Edition 2021) for backend changes; Node.js 18+ / TypeScript for capture service; TypeScript / Next.js 14 for WebUI capture page + `playwright-core` (Node.js, headless browser), `reqwest` (Rust, HTTP client — already present), Next.js 14 (WebUI — existing)
 
 
 <!-- MANUAL ADDITIONS START -->

@@ -108,7 +108,7 @@ impl TriggerManager {
     pub fn add_sample(&mut self, id: &str, sample: f64, timestamp: DateTime<Utc>, _sensitivity: f64) -> Option<AlertEvent> {
         if !id.contains(&self.config.target_channel) { return None; }
 
-        let clean_id = id.split('.').last().unwrap_or(id).trim_matches('\'').trim().to_string();
+        let clean_id = id.rsplit('.').next().unwrap_or(id).trim_matches('\'').trim().to_string();
 
         let highpass = self.config.highpass;
         let lowpass = self.config.lowpass;
@@ -144,7 +144,7 @@ impl TriggerManager {
 
         // Evaluate only at packet boundaries (every 25 samples), matching Python rsudp.
         // Python rsudp evaluates once per ~250ms packet at 100 SPS.
-        if state.sample_count % 25 != 0 || state.raw_buffer.len() < win_size {
+        if !state.sample_count.is_multiple_of(25) || state.raw_buffer.len() < win_size {
             return None;
         }
 

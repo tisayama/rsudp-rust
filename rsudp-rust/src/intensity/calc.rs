@@ -37,7 +37,7 @@ impl IntensityManager {
 
     pub fn add_samples(&mut self, samples_map: HashMap<String, Vec<f64>>, start_time: DateTime<Utc>) {
         let mut needs_reset = false;
-        for (ch, _) in &samples_map {
+        for ch in samples_map.keys() {
             if let Some(buf) = self.buffers.get(ch) {
                 if !buf.is_empty() {
                     if let Some(&st) = self.buffer_start_times.get(ch) {
@@ -131,9 +131,9 @@ impl IntensityManager {
                 window_data[i] = buf[0..window_len].to_vec();
             }
 
-            for i in 0..3 {
+            for (i, wd) in window_data.iter_mut().enumerate() {
                 let sens = self.config.sensitivities.get(i).unwrap_or(&1.0);
-                for val in &mut window_data[i] {
+                for val in wd.iter_mut() {
                     *val *= 100.0 * sens;
                 }
             }
@@ -152,9 +152,9 @@ impl IntensityManager {
                 let buf = self.buffers.get_mut(ch).unwrap();
                 let st = self.buffer_start_times.get_mut(ch).unwrap();
                 buf.drain(0..slide_samples);
-                *st = *st + Duration::milliseconds((slide_samples as f64 * 1000.0 / self.config.sample_rate).round() as i64);
+                *st += Duration::milliseconds((slide_samples as f64 * 1000.0 / self.config.sample_rate).round() as i64);
             }
-            latest_start = latest_start + Duration::milliseconds((slide_samples as f64 * 1000.0 / self.config.sample_rate).round() as i64);
+            latest_start += Duration::milliseconds((slide_samples as f64 * 1000.0 / self.config.sample_rate).round() as i64);
         }
     }
 

@@ -19,6 +19,7 @@ use crate::pubsub::publisher::SegmentData;
 use crate::rsam::RsamManager;
 use std::sync::Arc;
 
+#[allow(clippy::too_many_arguments)]
 pub async fn run_pipeline(
     mut receiver: mpsc::Receiver<Vec<u8>>,
     trigger_config: TriggerConfig,
@@ -135,13 +136,7 @@ pub async fn run_pipeline(
 
                             // Audio Alert Trigger
                             if let Some(audio) = &audio_iter {
-                                let audio_clone = audio.clone();
-                                let file_path = alert_sound_settings.trigger_file.clone();
-                                if !file_path.is_empty() {
-                                    tokio::task::spawn_blocking(move || {
-                                        audio_clone.play_file(&file_path);
-                                    });
-                                }
+                                audio.queue_file(&alert_sound_settings.trigger_file);
                             }
                             
                             let plot_settings = web_state.settings.read().unwrap().clone();
@@ -238,23 +233,16 @@ pub async fn run_pipeline(
 
                                 // Audio Alert Reset
                                 if let Some(audio) = &audio_iter {
-                                    let audio_clone = audio.clone();
-                                    // Use captured settings for reset sound mapping
-                                    let sound_settings = alert_sound_settings.clone(); 
-                                    let intensity_str = shindo.to_string();
-                                    
-                                    tokio::task::spawn_blocking(move || {
-                                        let file_path = sound_settings.intensity_files
-                                            .get(&intensity_str)
-                                            .cloned()
-                                            .unwrap_or(sound_settings.default_reset_file.clone());
-                                        
-                                        if !file_path.is_empty() {
-                                            audio_clone.play_file(&file_path);
-                                        } else {
-                                            warn!("No audio file found for intensity {} and no default configured", intensity_str);
-                                        }
-                                    });
+                                    let file_path = alert_sound_settings.intensity_files
+                                        .get(&shindo.to_string())
+                                        .cloned()
+                                        .unwrap_or(alert_sound_settings.default_reset_file.clone());
+
+                                    if file_path.is_empty() {
+                                        warn!("No audio file found for intensity {} and no default configured", shindo);
+                                    } else {
+                                        audio.queue_file(&file_path);
+                                    }
                                 }
                             }
                         },

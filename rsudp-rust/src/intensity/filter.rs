@@ -71,8 +71,8 @@ impl JmaFilter {
             if denom.abs() > 1e-9 {
                 let slope = (dn * sum_xy - sum_x * sum_y) / denom;
                 let intercept = (sum_y - slope * sum_x) / dn;
-                for i in 0..d.len() {
-                    d[i] -= slope * i as f64 + intercept;
+                for (i, val) in d.iter_mut().enumerate() {
+                    *val -= slope * i as f64 + intercept;
                 }
             }
             
@@ -87,14 +87,14 @@ impl JmaFilter {
 
             fft.process(&mut buffer);
 
-            for i in 0..n {
+            for (i, coeff) in buffer.iter_mut().enumerate() {
                 let f = if i <= n / 2 {
                     i as f64 * self.sample_rate / dn
                 } else {
                     (n - i) as f64 * self.sample_rate / dn
                 };
                 let gain = self.calculate_gain(f);
-                buffer[i] *= gain;
+                *coeff *= gain;
             }
 
             let ifft = planner.plan_fft_inverse(n);

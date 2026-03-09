@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 use chrono::{Duration, Utc};
 use crate::web::alerts::{AlertEvent, AlertSettings};
 
+#[derive(Default)]
 pub struct AlertHistoryManager {
     events: VecDeque<AlertEvent>,
     settings: AlertSettings,
@@ -10,10 +11,7 @@ pub struct AlertHistoryManager {
 
 impl AlertHistoryManager {
     pub fn new() -> Self {
-        Self {
-            events: VecDeque::new(),
-            settings: AlertSettings::default(),
-        }
+        Self::default()
     }
 
     pub fn add_event(&mut self, event: AlertEvent) {
